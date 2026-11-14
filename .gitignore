@@ -1,0 +1,50 @@
+# Source documentation (README.md, docs/) is intentionally tracked.
+# Generated screenshots/captures and old design artifacts are not.
+
+# Secrets and local user data
+.env
+.env.*
+!.env.example
+.qta/
+**/.qta/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Node / build output
+node_modules/
+web/node_modules/
+web/dist/
+dist/
+build/
+*.egg-info/
+
+# Generated screenshots and captures (documentation source stays in docs/)
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.svg
+.playwright/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
+.stfolder/
+.stignore
+
+# Local Docker overrides
+docker-compose.override.yml

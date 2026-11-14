@@ -1,0 +1,37 @@
+services:
+  quick-takeapart:
+    build: .
+    image: quick-takeapart:local
+    ports:
+      - "${QTA_PORT:-7741}:7741"
+    volumes:
+      # Project to index. Defaults to this checkout. The app writes its .qta/
+      # artifacts inside this mount, so keep it read-write.
+      - "${QTA_PROJECT:-.}:/workspace"
+      # UI API settings (key/base/model) survive container recreation.
+      - qta-settings:/data
+    environment:
+      QTA_SETTINGS_PATH: /data/settings.json
+      # Optional fallback if you prefer environment configuration over the UI.
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+    command:
+      - python3
+      - serve.py
+      - /workspace
+      - --host
+      - 0.0.0.0
+      - --port
+      - "7741"
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7741/api/health')"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  qta-settings:
