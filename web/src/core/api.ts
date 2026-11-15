@@ -1,5 +1,5 @@
 import type {
-  ApiSettings, BasePayload, LlmConfigView, LlmProfile, LlmProvider,
+  ApiSettings, BasePayload, LangPack, LlmConfigView, LlmProfile, LlmProvider,
   SelectionContext, Skeleton, SkeletonNode, Slice, Thread, TrackData,
   TraceResult, Workspace,
 } from "../types";
@@ -82,6 +82,11 @@ export const api = {
       `/api/llm/profiles/${encodeURIComponent(id)}/probe`, {}),
 
   settings: () => request<{ settings: ApiSettings }>("/api/settings"),
+  langpacks: () => request<{ items: LangPack[] }>("/api/langpacks"),
+  installLangpack: (id: string) =>
+    post<LangPack>("/api/langpacks/install", { id }),
+  removeLangpack: (id: string) =>
+    post<LangPack>("/api/langpacks/remove", { id }),
   saveSettings: (body: {
     apiKey?: string;
     baseUrl?: string;

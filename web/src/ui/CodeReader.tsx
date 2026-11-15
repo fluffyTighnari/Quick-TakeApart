@@ -20,25 +20,54 @@ const TS_KEYWORDS = new Set([
   "abstract", "declare", "keyof", "unknown", "never",
 ]);
 
-const GO_KEYWORDS = new Set([
+const GOLANG_KEYWORDS = new Set([
   "package", "import", "func", "type", "struct", "interface", "var",
   "const", "return", "if", "else", "for", "range", "go", "defer",
   "chan", "select", "case", "switch", "break", "continue", "fallthrough",
   "map", "make", "new", "nil", "true", "false", "iota", "default",
 ]);
 
-function languageForFile(file: string): "python" | "typescript" | "go" | "generic" {
+const JAVA_KEYWORDS = new Set([
+  "package", "import", "class", "interface", "enum", "record", "extends",
+  "implements", "public", "private", "protected", "static", "final",
+  "abstract", "native", "synchronized", "transient", "volatile", "strictfp",
+  "default", "sealed", "permits", "void", "boolean", "byte", "char",
+  "short", "int", "long", "float", "double", "return", "if", "else",
+  "for", "while", "do", "switch", "case", "break", "continue", "new",
+  "this", "super", "try", "catch", "finally", "throw", "throws",
+  "instanceof", "null", "true", "false", "var", "yield", "assert",
+]);
+
+const CPP_KEYWORDS = new Set([
+  "alignas", "auto", "bool", "break", "case", "catch", "char", "class",
+  "const", "constexpr", "continue", "decltype", "default", "delete", "do",
+  "double", "else", "enum", "explicit", "export", "extern", "false",
+  "float", "for", "friend", "goto", "if", "inline", "int", "long",
+  "mutable", "namespace", "new", "noexcept", "nullptr", "operator",
+  "override", "private", "protected", "public", "return", "short",
+  "signed", "sizeof", "static", "struct", "switch", "template", "this",
+  "throw", "true", "try", "typedef", "typename", "union", "unsigned",
+  "using", "virtual", "void", "volatile", "while",
+]);
+
+type CodeLanguage = "python" | "typescript" | "go" | "java" | "cpp" | "generic";
+
+function languageForFile(file: string): CodeLanguage {
   const ext = file.slice(file.lastIndexOf(".")).toLowerCase();
   if ([".py", ".pyi"].includes(ext)) return "python";
   if ([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].includes(ext)) return "typescript";
   if (ext === ".go") return "go";
+  if (ext === ".java") return "java";
+  if ([".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx", ".c++", ".h++", ".ino"].includes(ext)) return "cpp";
   return "generic";
 }
 
 function keywordsFor(language: string): Set<string> {
   if (language === "python") return PY_KEYWORDS;
   if (language === "typescript") return TS_KEYWORDS;
-  if (language === "go") return GO_KEYWORDS;
+  if (language === "go") return GOLANG_KEYWORDS;
+  if (language === "java") return JAVA_KEYWORDS;
+  if (language === "cpp") return CPP_KEYWORDS;
   return new Set();
 }
 

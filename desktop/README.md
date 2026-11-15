@@ -48,8 +48,8 @@ npm run build            # prepare-runtime + tauri build --no-bundle + makensis 
 
 | 产物 | 说明 |
 | --- | --- |
-| `Quick-TakeApart_2.0.0_x64-setup.exe` | NSIS 安装包，per-user 安装到 `%LOCALAPPDATA%\Quick-TakeApart`，带卸载项 |
-| `Quick-TakeApart_2.0.0_x64-portable.zip` | 便携包，解压即用 |
+| [`Quick-TakeApart_2.1.0_x64-setup.exe`](dist/Quick-TakeApart_2.1.0_x64-setup.exe) | NSIS 安装包，per-user 安装到 `%LOCALAPPDATA%\Quick-TakeApart`，带卸载项 |
+| [`Quick-TakeApart_2.1.0_x64-portable.zip`](dist/Quick-TakeApart_2.1.0_x64-portable.zip) | 便携包，解压即用 |
 | `Quick-TakeApart/` | 上面两者的共同内容：`Quick-TakeApart.exe` + `runtime/` |
 
 只重打外壳（没改 Python / 前端）：
@@ -76,6 +76,7 @@ npm run runtime
 | --- | --- |
 | 引擎日志（stderr） | `%LOCALAPPDATA%\Quick-TakeApart\backend.log` |
 | 应用数据（设置、最近项目、track） | `~/.qta`（沿用原有逻辑，未改动） |
+| 可选语言包（Java / C/C++） | `~/.qta/langpacks/<id>`（`QTA_LANGPACK_DIR` 可覆盖） |
 | runtime | 安装目录下的 `runtime\`（NSIS 装到 `%LOCALAPPDATA%\Quick-TakeApart`） |
 
 ## 注意
@@ -88,15 +89,26 @@ npm run runtime
 
 ## 语言支持
 
-runtime 目前固定带 Python 的 pyright；TypeScript/JavaScript 和 Go 走自动检测：
+runtime 自带 Python 的 pyright；TypeScript/JavaScript 和 Go 走自动检测；Java 与 C/C++ 用「应用内按需下载」的语言包，不打进安装包。
 
-- Python：`runtime/server/node_modules/pyright` + runtime 的 `node.exe`。
-- TypeScript/JavaScript：检测 PATH 里的 `typescript-language-server` 和 TypeScript 5.x 的 `tsserver.js`；也可以在应用内 API 设置的“Language servers”里指定命令。
-- Go：检测 PATH 里的 `gopls`；也可以在设置里指定 `gopls serve`。
+| 语言 | 来源 | 说明 |
+| --- | --- | --- |
+| Python | `runtime/server/node_modules/pyright` + runtime 的 `node.exe` | 必需，随包 |
+| TypeScript/JavaScript | PATH 里的 `typescript-language-server`（tsserver.js 会自动找） | 不随包，检测复用 |
+| Go | PATH 里的 `gopls` | 不随包，检测复用 |
+| Java | `engine/langpacks.py` 下载 jdtls + JRE 25 | 约 102 MB，装完不依赖本机 Java |
+| C / C++ | 同上，下载 clangd 23.1.0 | 约 30 MB，单文件二进制 |
 
-已有服务器会直接复用，不需要重复安装。若要在安装器里做真正的语言组件勾选，需要两步：
+首个来源都可在应用设置里用命令覆盖（`QTA_JDTLS` / `QTA_CLANGD` 等环境变量同理）。
 
-1. `prepare-runtime.ps1` 把选中的 LSP 复制到 `runtime/ls/...`（同时处理 TypeScript 的 tsserver 路径）；
-2. `installer.nsi` 增加 `MUI_PAGE_COMPONENTS` 和可选 `Section`，按勾选复制对应目录并设置对应环境变量。
+### 语言包为什么走下载
 
-标准 Tauri NSIS 只提供安装界面语言选择，不提供任意资源组件页；因此当前先采用“检测复用 + 应用内设置”，安装器阶段的语言勾选作为后续可选组件方案。
+jdtls 约 50 MB、它要求的运行时又是 50 MB 量级，clangd 约 30 MB；直接进安装块会让安装包从 39 MB 涨到 150 MB 以上，而多数人只读一两种语言。所以 `engine/langpacks.py` 定义了包目录（id、体积、下载/解压步骤、入口文件查找），`/api/langpacks*` 暴露给前端，下载放到后台线程，进度由设置页轮询。
+
+几个必须保留的细节：
+
+- 下载走系统 `curl.exe`（`--ssl-no-revoke` + 失败重试），因为本机 Python 的 urllib 直连 GitHub/open-vsx 会被重置；curl 不可用时才回落 urllib。
+- jdtls 取自 open-vsx 的 `redhat.java` 扩展（`extension/server` 目录，与 Eclipse 快照同一份构建），因为 `download.eclipse.org` 在这类网络上只有 0.02 MB/s；版本号在 `engine/langpacks.py` 里写死，升级时改 URL 并重测。
+- jdtls 1.59 的 bundle 要求 `osgi.ee version=25`，所以内置运行时必须是 JRE 25（用 17/21 会在 OSGi 解析阶段直接退出，日志只报 `UnsupportedClassVersionError` 或 bundle 未解析）。
+- 装完包不会自动重建索引，需要重新打开项目（`index_project` 在 open 时跑）。
+- 若要在安装器里做组件勾选，仍有两条路：把包塞进 `installer.nsi` 的可选 `Section`（安装包变大），或在安装阶段联网下载（失败要重装）；当前选择的是应用内下载。

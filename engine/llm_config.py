@@ -56,7 +56,7 @@ PROVIDERS: dict[str, dict] = {
         "supports_model_list": True, "default_model": "deepseek-flash",
         "key_hint": "在 DeepSeek 控制台创建 API key",
         "known_models": ["deepseek-flash", "deepseek-v4-pro", "deepseek-chat"],
-        "context_window": 65536,
+        "context_window": 1_048_576,
     },
     "openai": {
         "provider_id": "openai", "label": "OpenAI", "kind": "openai",
@@ -64,7 +64,7 @@ PROVIDERS: dict[str, dict] = {
         "supports_model_list": True, "default_model": "gpt-4.1-mini",
         "key_hint": "在 OpenAI 平台创建 API key",
         "known_models": ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
-        "context_window": 128000,
+        "context_window": 1_047_576,
     },
     "dashscope": {
         "provider_id": "dashscope", "label": "阿里云 DashScope", "kind": "openai",

@@ -35,6 +35,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from engine import build_index
 from engine.claims import claims_from_edges, verify
 from engine.languages import language_status
+from engine.langpacks import (install as langpack_install, items as langpack_items,
+                              known as langpack_known, remove as langpack_remove)
 from engine.llm_config import (LlmConfigError, activate_profile, config_view,
                                create_profile, delete_profile, get_profile,
                                list_models as llm_list_models, list_profiles,
@@ -413,16 +415,20 @@ class Handler(BaseHTTPRequestHandler):
         if route in ("/api/health", "/api/version"):
             self._json({
                 "ok": True,
-                "version": "2.0",
-                "build": "workspace-tracks-slices-trace",
+                "version": "2.1",
+                "build": "langpacks-java-cpp",
                 "features": [
                     "workspace", "browse", "pick-folder", "tracks",
                     "skeletons", "slices", "regenerate-slice",
                     "plan-chat", "threads", "trace", "settings", "llm-profiles",
+                    "languages", "langpacks",
                 ],
                 "root": STATE["base"]["root"] if STATE["base"] else None,
                 "frontend": "dist",
             })
+            return
+        if route == "/api/langpacks":
+            self._json({"items": langpack_items()})
             return
         if route == "/api/index":
             if STATE["base"] is None:
@@ -641,6 +647,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "/api/settings":
             self._handle_save_settings()
+            return
+        if route == "/api/langpacks/install":
+            body = self._read_json()
+            pack_id = str(body.get("id") or "")
+            try:
+                self._json(langpack_install(pack_id))
+            except KeyError:
+                self._json({"error": f"未知语言包：{pack_id}"}, 404)
+            return
+        if route == "/api/langpacks/remove":
+            body = self._read_json()
+            pack_id = str(body.get("id") or "")
+            try:
+                self._json(langpack_remove(pack_id))
+            except KeyError:
+                self._json({"error": f"未知语言包：{pack_id}"}, 404)
+            except RuntimeError as exc:
+                self._json({"error": str(exc)}, 409)
             return
         if route == "/api/skeletons/generate":
             self._handle_generate_skeleton()

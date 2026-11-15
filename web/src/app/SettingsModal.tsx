@@ -5,7 +5,7 @@ import {
 import { api } from "../core/api";
 import { useApp } from "../core/store";
 import type {
-  ApiSettings, LlmConfigView, LlmProfile, LlmProvider,
+  ApiSettings, LangPack, LlmConfigView, LlmProfile, LlmProvider,
 } from "../types";
 
 type Tab = "model" | "languages";
@@ -75,6 +75,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState("");
   const [settings, setSettings] = useState<ApiSettings | null>(null);
   const [languageServers, setLanguageServers] = useState<Record<string, string>>({});
+  const [packs, setPacks] = useState<LangPack[]>([]);
+  const [selectedPacks, setSelectedPacks] = useState<string[]>([]);
 
   const provider = useMemo(
     () => providers.find((item) => item.provider_id === draft?.provider_id) || null,
@@ -101,8 +103,65 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     refresh(false).catch((err) => {
       if (alive) setError(err instanceof Error ? err.message : String(err));
     });
+    void loadPacks();
     return () => { alive = false; };
   }, []);
+
+  async function loadPacks() {
+    try {
+      const res = await api.langpacks();
+      setPacks(res.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const installing = packs.some((item) => item.state === "installing");
+
+  useEffect(() => {
+    if (!installing) return;
+    const timer = window.setInterval(() => { void loadPacks(); }, 1200);
+    return () => window.clearInterval(timer);
+  }, [installing]);
+
+  function togglePack(id: string) {
+    setSelectedPacks((current) => (
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    ));
+  }
+
+  async function downloadPacks() {
+    const ids = selectedPacks.filter((id) => {
+      const pack = packs.find((item) => item.id === id);
+      return pack && !pack.installed && pack.state !== "installing";
+    });
+    if (!ids.length) return;
+    setSelectedPacks([]);
+    setError("");
+    setMessage("");
+    try {
+      for (const id of ids) await api.installLangpack(id);
+      setMessage(`已开始后台下载 ${ids.length} 个语言包，可以关闭这个面板`);
+      await loadPacks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function removePack(id: string) {
+    const pack = packs.find((item) => item.id === id);
+    if (!pack) return;
+    const ok = window.confirm(`删除 ${pack.label} 语言包？对应的语言服务器会变为不可用。`);
+    if (!ok) return;
+    setError("");
+    try {
+      await api.removeLangpack(id);
+      setMessage(`${pack.label} 语言包已删除`);
+      await loadPacks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   function selectProvider(providerId: string) {
     const next = providers.find((item) => item.provider_id === providerId);
@@ -472,6 +531,49 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <div className="settings-form">
+            <div className="panel-flat panel-body" style={{ marginBottom: 10 }}>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>可选语言包</div>
+              <p className="small muted" style={{ marginBottom: 8 }}>
+                Java 与 C/C++ 的语言服务器体积较大，默认不打进安装包。勾选后按需下载到本机，下载完重新打开项目即可重建索引。
+              </p>
+              {packs.map((pack) => {
+                const chosen = selectedPacks.includes(pack.id);
+                const running = pack.state === "installing";
+                return (
+                  <div className="row" key={pack.id} style={{ alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <label className="settings-model-row grow" style={{ margin: 0 }}>
+                      <input type="checkbox"
+                        checked={pack.installed || running || chosen}
+                        disabled={pack.installed || running}
+                        onChange={() => togglePack(pack.id)} />
+                      <span>{pack.label}</span>
+                      <span className="small muted">{pack.requires}</span>
+                    </label>
+                    {pack.installed ? <span className="chip teal">已安装</span> : null}
+                    {running ? <span className="chip amber">下载中 {pack.percent}%</span> : null}
+                    {pack.state === "failed" ? <span className="chip amber">失败</span> : null}
+                    {pack.installed ? (
+                      <button className="btn btn-xs" onClick={() => void removePack(pack.id)}>删除</button>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {installing ? (
+                <div className="small muted">
+                  {packs.find((item) => item.state === "installing")?.message || "正在下载…"}
+                </div>
+              ) : null}
+              {packs.filter((item) => item.state === "failed").map((item) => (
+                <div className="notice bad" key={`${item.id}-fail`}>{item.label}：{item.message}</div>
+              ))}
+              <div className="row" style={{ justifyContent: "flex-end", marginTop: 6 }}>
+                <button className="btn btn-primary"
+                  disabled={!selectedPacks.length || installing}
+                  onClick={() => void downloadPacks()}>
+                  <Plus size={12} /> 下载勾选的语言包
+                </button>
+              </div>
+            </div>
             <div className="panel-flat panel-body">
               <div className="eyebrow" style={{ marginBottom: 4 }}>Language servers</div>
               <p className="small muted" style={{ marginBottom: 8 }}>
@@ -488,6 +590,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 ["python", "Python", "node …/pyright/langserver.index.js --stdio"],
                 ["typescript", "TypeScript / JavaScript", "typescript-language-server --stdio"],
                 ["go", "Go", "gopls serve"],
+                ["java", "Java", "语言包装好后自动填入；也可在此覆盖"],
+                ["cpp", "C / C++", "clangd"],
               ].map(([id, label, placeholder]) => (
                 <div className="field" key={id}>
                   <label>{label}</label>

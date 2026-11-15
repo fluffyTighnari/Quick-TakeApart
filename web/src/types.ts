@@ -46,6 +46,20 @@ export interface LanguageStatus {
   source: string;
 }
 
+export interface LangPack {
+  id: string;
+  label: string;
+  detail: string;
+  size_mb: number;
+  requires: string;
+  installed: boolean;
+  state: "idle" | "installing" | "installed" | "failed";
+  percent: number;
+  message: string;
+  command: string;
+  installed_at: string;
+}
+
 export interface BasePayload {
   root: string;
   name: string;

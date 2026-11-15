@@ -15,6 +15,7 @@ import shlex
 import shutil
 from dataclasses import dataclass, field
 
+from .langpacks import server_command as langpack_command
 from .settings import load_settings, settings_path
 
 APP_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -51,7 +52,31 @@ GO_KEYWORDS = (
     "const", "return", "if", "else", "for", "range", "go", "defer",
     "chan", "select", "case", "switch", "break", "continue", "fallthrough",
     "map", "make", "new", "nil", "true", "false", "iota", "default",
-    "package", "using", "try", "catch", "finally", "throw",
+)
+
+JAVA_KEYWORDS = (
+    "package", "import", "class", "interface", "enum", "record", "extends",
+    "implements", "public", "private", "protected", "static", "final",
+    "abstract", "native", "synchronized", "transient", "volatile", "strictfp",
+    "default", "sealed", "permits", "non-sealed", "void", "boolean", "byte",
+    "char", "short", "int", "long", "float", "double", "return", "if",
+    "else", "for", "while", "do", "switch", "case", "break", "continue",
+    "new", "this", "super", "try", "catch", "finally", "throw", "throws",
+    "instanceof", "null", "true", "false", "var", "yield", "assert",
+    "module", "requires", "exports", "opens", "uses", "provides",
+)
+
+CPP_KEYWORDS = (
+    "alignas", "alignof", "asm", "auto", "bool", "break", "case", "catch",
+    "char", "class", "const", "constexpr", "continue", "decltype", "default",
+    "delete", "do", "double", "else", "enum", "explicit", "export", "extern",
+    "false", "final", "float", "for", "friend", "goto", "if", "inline",
+    "int", "long", "mutable", "namespace", "new", "noexcept", "nullptr",
+    "operator", "override", "private", "protected", "public", "register",
+    "return", "short", "signed", "sizeof", "static", "struct", "switch",
+    "template", "this", "throw", "true", "try", "typedef", "typename",
+    "union", "unsigned", "using", "virtual", "void", "volatile", "while",
+    "#include", "#define", "#ifndef", "#endif",
 )
 
 
@@ -95,6 +120,8 @@ def _override(name: str) -> tuple[str, ...] | None:
         "python": "QTA_PYRIGHT",
         "typescript": "QTA_TYPESCRIPT_SERVER",
         "go": "QTA_GOPLS",
+        "java": "QTA_JDTLS",
+        "cpp": "QTA_CLANGD",
     }.get(name)
     raw = os.environ.get(env, "") if env else ""
     if not raw:
@@ -187,8 +214,63 @@ def _go_spec() -> LanguageSpec:
     )
 
 
+def _java_spec() -> LanguageSpec:
+    override = _override("java")
+    if override:
+        command, source = override, "config"
+    else:
+        command = langpack_command("java")
+        if command:
+            source = "langpack"
+        else:
+            command = _resolved_command("jdtls", ("-stdio",))
+            source = "path" if command else "missing"
+    return LanguageSpec(
+        id="java", label="Java", extensions=(".java",), language_id="java",
+        command=command, source=source,
+        constructor_names=(), keywords=JAVA_KEYWORDS,
+        initialization_options={
+            "settings": {
+                "java": {
+                    "import": {"maven": {"enabled": True},
+                               "gradle": {"enabled": True}},
+                    "signatureHelp": {"enabled": True},
+                    "contentProvider": {"preferred": "fernflower"},
+                }
+            },
+        },
+    )
+
+
+def _cpp_spec() -> LanguageSpec:
+    override = _override("cpp")
+    if override:
+        command, source = override, "config"
+    else:
+        command = langpack_command("cpp")
+        if command:
+            source = "langpack"
+        else:
+            command = _resolved_command("clangd", ())
+            source = "path" if command else "missing"
+    return LanguageSpec(
+        id="cpp", label="C / C++",
+        extensions=(".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh",
+                    ".hxx", ".c++", ".h++", ".ino"),
+        language_id="cpp", command=command, source=source,
+        constructor_names=(), keywords=CPP_KEYWORDS,
+        initialization_options={
+            "clangdFileStatus": True,
+            "fallbackFlags": ["-std=c++17"],
+        },
+    )
+
+
 def language_specs() -> list[LanguageSpec]:
-    return [_python_spec(), _typescript_spec(), _go_spec()]
+    return [
+        _python_spec(), _typescript_spec(), _go_spec(),
+        _java_spec(), _cpp_spec(),
+    ]
 
 
 def spec_for_path(path: str) -> LanguageSpec | None:
