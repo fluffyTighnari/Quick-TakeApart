@@ -11,19 +11,13 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 
-DEFAULT_MODEL = "deepseek-v4.1-flash"
-DEFAULT_MODELS = ("deepseek-v4.1-flash", "deepseek-flash", "deepseek-v4-pro")
-DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic"
+DEFAULT_MODEL = "deepseek-flash"
+DEFAULT_MODELS = ("deepseek-flash", "deepseek-v4-pro")
+DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY"
 SETTINGS_DIR = ".qta"
-
-
-class SettingsError(RuntimeError):
-    pass
 
 
 def settings_path() -> pathlib.Path:
@@ -47,6 +41,7 @@ def load_settings() -> dict:
         "apiKey": str(raw.get("apiKey") or ""),
         "baseUrl": str(raw.get("baseUrl") or ""),
         "model": str(raw.get("model") or ""),
+        "languageServers": dict(raw.get("languageServers") or {}),
         "updatedAt": str(raw.get("updatedAt") or ""),
     }
 
@@ -58,12 +53,28 @@ def save_settings(values: dict, *, clear_key: bool = False) -> dict:
         api_key = ""
     elif str(values.get("apiKey") or "").strip():
         api_key = str(values["apiKey"]).strip()
-    base_url = str(values.get("baseUrl") or "").strip()
-    model = str(values.get("model") or "").strip()
+    base_url = str(current.get("baseUrl") or "").strip()
+    model = str(current.get("model") or "").strip()
+    if "baseUrl" in values:
+        base_url = str(values.get("baseUrl") or "").strip()
+    if "model" in values:
+        model = str(values.get("model") or "").strip()
+    language_servers = dict(current.get("languageServers") or {})
+    incoming = values.get("languageServers")
+    if isinstance(incoming, dict):
+        for key in ("python", "typescript", "go"):
+            if key not in incoming:
+                continue
+            command = str(incoming[key] or "").strip()
+            if command:
+                language_servers[key] = command
+            else:
+                language_servers.pop(key, None)
     updated = {
         "apiKey": api_key,
         "baseUrl": base_url,
         "model": model,
+        "languageServers": language_servers,
         "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     path = settings_path()
@@ -96,6 +107,7 @@ def public_settings(values: dict | None = None) -> dict:
         "keyHint": mask_key(key),
         "envKey": bool(env_key),
         "envKeyHint": mask_key(env_key),
+        "languageServers": dict(values.get("languageServers") or {}),
         "updatedAt": values.get("updatedAt") or "",
         "settingsPath": str(settings_path()),
     }
@@ -118,54 +130,4 @@ def resolve_credentials() -> tuple[str, str, str]:
     return key, base, model
 
 
-def _model_urls(base_url: str) -> list[str]:
-    base = (base_url or DEFAULT_BASE_URL).strip().rstrip("/")
-    urls: list[str] = []
-    if base.endswith("/anthropic"):
-        urls.append(base[:-len("/anthropic")] + "/models")
-    urls.append(base + "/models")
-    if not base.endswith("/v1"):
-        urls.append(base + "/v1/models")
-    seen: set[str] = set()
-    return [u for u in urls if not (u in seen or seen.add(u))]
 
-
-def fetch_models(base_url: str, api_key: str) -> list[str]:
-    """Ask an OpenAI-compatible /models endpoint for model ids.
-
-    Anthropic-style base URLs (for example .../anthropic) are also handled by
-    trying the sibling /models path. The endpoint is allowed to be custom; a
-    failure is reported as a readable settings error, not a crash.
-    """
-    if not api_key:
-        raise SettingsError("no API key: enter a key or configure one in the environment")
-    errors: list[str] = []
-    for url in _model_urls(base_url):
-        request = urllib.request.Request(url, headers={
-            "Authorization": f"Bearer {api_key}",
-            "x-api-key": api_key,
-            "Accept": "application/json",
-        })
-        try:
-            with urllib.request.urlopen(request, timeout=8) as response:
-                raw = json.loads(response.read().decode("utf-8", "replace"))
-        except (OSError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
-            errors.append(f"{url}: {exc}")
-            continue
-        items = raw.get("data") if isinstance(raw, dict) else raw
-        if not isinstance(items, list):
-            items = raw.get("models") if isinstance(raw, dict) else None
-        models: list[str] = []
-        for item in items or []:
-            if isinstance(item, str):
-                model = item.strip()
-            elif isinstance(item, dict):
-                model = str(item.get("id") or item.get("name") or "").strip()
-            else:
-                model = ""
-            if model and model not in models:
-                models.append(model)
-        if models:
-            return models
-        errors.append(f"{url}: no model ids in response")
-    raise SettingsError("; ".join(errors[-3:]) or "model catalog unavailable")

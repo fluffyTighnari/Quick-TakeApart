@@ -11,7 +11,7 @@
 ## 1. 领域模型
 
 ```text
-Workspace（目录，持有 pyright 索引）
+Workspace（目录，持有多语言 LSP 索引）
 └── Track（学习轨道 = 一个目的）
     ├── Skeleton（阶段一产物：主流程 + 平行支撑 + 按需节点讲解）
     ├── Plan（步骤 DAG）
@@ -25,6 +25,8 @@ Workspace（目录，持有 pyright 索引）
 - 一个项目目录对应一个 workspace。
 - 索引、符号、调用边、文件源文本是 workspace 级共享资源。
 - 同一时间服务端只驻留一个 workspace 的索引；切换目录时重建索引，但磁盘产物不丢。
+- 语言通过 `LanguageSpec` 适配：Python（pyright）、TypeScript/JavaScript（typescript-language-server）、Go（gopls）。一个 workspace 内多语言合并索引；缺少某个 LSP 时保留文件浏览并明确标注不可用，不伪造符号或调用边。
+- 跨语言边通常无法由 LSP 证明；它们以 boundary 形式呈现，而不是硬连成一条调用链。
 
 ### 1.2 Track
 
@@ -233,7 +235,7 @@ web/src/
 代码阅读器：
 
 - 行号、语法高亮、选区。
-- **查找收窄**：Ctrl+点击函数/类定义与函数调用查定义、引用、来源、去向；Ctrl+点击语言关键字在当前代码里查找出现位置。变量、`self`、字面量和普通单词不响应。
+- **查找收窄**：Ctrl+点击函数/类定义、函数调用和变量查定义、引用、来源、去向；语言关键字、`self` 和字面量不响应。
 - 选中文本浮动工具条：提问 / 切开 / 复制引用。
 - 面包屑：轨道 → 计划步骤 / 骨架节点 / 切片 → 文件 → 函数。
 
@@ -247,14 +249,35 @@ web/src/
 
 ## 5. 后端 API
 
-### Settings
+### Language settings
 
 ```text
-GET  /api/settings                 -> baseUrl/model/hasKey/keyHint （key 不回显）
-POST /api/settings                 {apiKey?,baseUrl?,model?,clearKey?}
+GET  /api/settings                 -> languageServers / 旧版兼容字段
+POST /api/settings                 {languageServers?}
 ```
 
-设置保存在本机（默认 `~/.qta/settings.json`，可用 `QTA_SETTINGS_PATH` 覆盖），不写项目目录。优先级：界面设置 > 环境变量 > 默认值。
+语言服务器命令保存在本机 `~/.qta/settings.json`；留空走 PATH 自动检测。
+
+### LLM providers / profiles
+
+```text
+GET  /api/llm/providers            -> items: 内置只读 Provider 目录
+GET  /api/llm/config               -> active / fallback / env_loaded
+GET  /api/llm/profiles             -> items: 不含密钥
+POST /api/llm/profiles             -> 201 Profile；第一份自动激活
+PATCH /api/llm/profiles/{id}       -> 局部更新，缺省字段不变
+DELETE /api/llm/profiles/{id}      -> {profile_id, active_profile_id}
+POST /api/llm/profiles/{id}/activate {model?}
+POST /api/llm/profiles/{id}/models   -> {models, note}；POST 不是 GET
+POST /api/llm/profiles/{id}/probe    -> {ok, detail}
+```
+
+- Provider 未知 → 422 并列出可用值；`base_url` 必须带 `http(s)`。
+- 拉清单失败、网络失败、模型不在清单但可调用 → 都是 200 + `note/detail`，不是 422。
+- 密钥只写 `~/.qta/secrets/<profile>.key`，响应永远只有 `has_key` / 掩码；`api_key` 三态：不传不改、`""` 清空、有值替换。
+- `models` 永远包含 `model`；`activate` 一次切换档案与模型。
+- 上下文预算 `num_ctx=0` 时用 Provider 保守窗口，响应给 `effective_num_ctx`；Ollama 显式发送，OpenAI 兼容请求不发送。
+- 支持 Provider：DeepSeek、OpenAI、DashScope、Moonshot、智谱、SiliconFlow、OpenRouter、Groq、Ollama、LM Studio、vLLM、Anthropic、自定义 OpenAI 兼容。
 
 ### Workspace / Track
 

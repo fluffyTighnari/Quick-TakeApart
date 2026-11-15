@@ -72,8 +72,10 @@ class Index:
     revision: str
     symbols: dict[str, Symbol] = dataclasses.field(default_factory=dict)
     edges: list[Edge] = dataclasses.field(default_factory=list)
-    # symbols pyright could not resolve; kept so the UI can say "unknown" instead of guessing
+    # symbols the language server could not resolve; kept so the UI can say "unknown" instead of guessing
     unresolved_calls: list[tuple[str, str, Range]] = dataclasses.field(default_factory=list)
+    # all discovered source files, including files whose language server is unavailable
+    files: list[str] = dataclasses.field(default_factory=list)
 
     def outgoing(self, symbol_id: str) -> list[Edge]:
         return [e for e in self.edges if e.caller_id == symbol_id]

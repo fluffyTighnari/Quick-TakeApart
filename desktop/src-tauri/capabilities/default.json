@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The shell only needs the built-in window features; all app traffic goes over localhost HTTP.",
+  "windows": ["main", "splash"],
+  "permissions": ["core:default"]
+}

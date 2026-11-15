@@ -1,6 +1,7 @@
 import type {
-  ApiSettings, BasePayload, SelectionContext, Skeleton, SkeletonNode,
-  Slice, Thread, TrackData, TraceResult, Workspace,
+  ApiSettings, BasePayload, LlmConfigView, LlmProfile, LlmProvider,
+  SelectionContext, Skeleton, SkeletonNode, Slice, Thread, TrackData,
+  TraceResult, Workspace,
 } from "../types";
 
 export class ApiError extends Error {
@@ -19,10 +20,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   } catch {
     data = null;
   }
-  const payload = (data || {}) as { error?: string; hint?: string };
+  const payload = (data || {}) as { error?: string; hint?: string; detail?: string };
   if (!res.ok || payload.error) {
-    const message = payload.error
-      ? `${payload.error}${payload.hint ? ` — ${payload.hint}` : ""}`
+    const text = payload.error || payload.detail;
+    const message = text
+      ? `${text}${payload.hint ? ` — ${payload.hint}` : ""}`
       : `HTTP ${res.status}`;
     throw new ApiError(message, res.status);
   }
@@ -37,6 +39,18 @@ function post<T>(url: string, body: unknown): Promise<T> {
   });
 }
 
+function patch<T>(url: string, body: unknown): Promise<T> {
+  return request<T>(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+function del<T>(url: string): Promise<T> {
+  return request<T>(url, { method: "DELETE" });
+}
+
 export const api = {
   health: () => request<{
     ok: boolean;
@@ -47,16 +61,34 @@ export const api = {
     frontend: string;
   }>("/api/health"),
   base: () => request<BasePayload>("/api/index"),
+  llmProviders: () => request<{ items: LlmProvider[] }>("/api/llm/providers"),
+  llmConfig: () => request<LlmConfigView>("/api/llm/config"),
+  llmProfiles: () => request<{ items: LlmProfile[] }>("/api/llm/profiles"),
+  createLlmProfile: (body: Record<string, unknown>) =>
+    post<LlmProfile>("/api/llm/profiles", body),
+  updateLlmProfile: (id: string, body: Record<string, unknown>) =>
+    patch<LlmProfile>(`/api/llm/profiles/${encodeURIComponent(id)}`, body),
+  deleteLlmProfile: (id: string) =>
+    del<{ profile_id: string; active_profile_id: string | null }>(
+      `/api/llm/profiles/${encodeURIComponent(id)}`),
+  activateLlmProfile: (id: string, model?: string) =>
+    post<LlmProfile>(`/api/llm/profiles/${encodeURIComponent(id)}/activate`,
+      model ? { model } : {}),
+  llmModels: (id: string) =>
+    post<{ profile_id: string; models: string[]; note: string }>(
+      `/api/llm/profiles/${encodeURIComponent(id)}/models`, {}),
+  llmProbe: (id: string) =>
+    post<{ profile_id: string; ok: boolean; detail: string }>(
+      `/api/llm/profiles/${encodeURIComponent(id)}/probe`, {}),
+
   settings: () => request<{ settings: ApiSettings }>("/api/settings"),
   saveSettings: (body: {
     apiKey?: string;
     baseUrl?: string;
     model?: string;
     clearKey?: boolean;
+    languageServers?: Record<string, string>;
   }) => post<{ settings: ApiSettings }>("/api/settings", body),
-  listModels: (body: { baseUrl: string; apiKey?: string }) =>
-    post<{ models: string[] }>("/api/settings/models", body),
-
   workspace: () => request<Workspace>("/api/workspace"),
   projects: () => request<{
     root: string | null;

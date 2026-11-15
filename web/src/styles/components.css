@@ -230,30 +230,6 @@
 .code-line .src .tok-word.traceable { cursor: pointer; }
 .code-line .src .tok-word.traceable:hover { text-decoration: underline dotted rgba(142,201,196,.7); }
 .code-line .src .tok-ghost { color: #d7e4df; }
-.code-line .src .keyword-hit {
-  background: rgba(224,168,109,.28);
-  box-shadow: inset 0 -1px 0 rgba(224,168,109,.8);
-  border-radius: 2px;
-}
-.code-keyword-hit {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 6px;
-  border: 1px solid rgba(224,168,109,.28);
-  border-radius: 99px;
-  background: rgba(224,168,109,.1);
-  color: #e0a86d;
-  font-size: 9.5px;
-}
-.code-keyword-hit button {
-  border: 0;
-  background: transparent;
-  color: #a8bfb9;
-  font-size: 9px;
-  padding: 0;
-}
-.code-keyword-hit button:hover { color: #fff; }
 
 .code-expand {
   display: flex;
@@ -674,6 +650,66 @@
   display: block;
 }
 .settings-url-row .input { width: 100%; padding-right: 112px; }
+.settings-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.settings-tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  padding: 7px 10px;
+  border-bottom: 2px solid transparent;
+}
+.settings-tabs button.active {
+  color: var(--ink);
+  border-bottom-color: var(--teal);
+}
+.settings-profile-list { display: flex; flex-direction: column; gap: 5px; }
+.settings-profile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 6px;
+  background: rgba(255,255,255,.5);
+}
+.settings-profile.active { border-color: rgba(47,125,115,.4); background: var(--teal-soft); }
+.settings-profile-main {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 3px;
+  color: var(--ink-2);
+}
+.settings-profile-main .sp-row { display: flex; align-items: center; gap: 5px; }
+.settings-profile-main .small { display: block; font-size: 10px; margin-top: 2px; }
+.settings-models {
+  border-top: 1px solid var(--line);
+  margin-top: 10px;
+  padding-top: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-model-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.settings-section {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
 .settings-url-row .btn {
   position: absolute;
   right: 6px;
@@ -1089,6 +1125,14 @@
   box-shadow: 0 30px 80px rgba(15,23,22,.25);
   overflow: hidden;
   animation: rise .16s ease both;
+}
+/* The settings form is taller than the viewport at common laptop heights.
+   `.palette` sets overflow:hidden; this more specific rule restores scrolling. */
+.palette.settings-modal {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: calc(100vh - 12vh - 32px);
 }
 .palette input {
   width: 100%; border: 0; border-bottom: 1px solid var(--line);

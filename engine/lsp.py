@@ -132,8 +132,9 @@ class LspClient:
 
     # --- lifecycle ---
 
-    async def initialize(self, root: pathlib.Path, timeout: float = 120.0) -> dict:
-        result = await self.request("initialize", {
+    async def initialize(self, root: pathlib.Path, timeout: float = 120.0,
+                         options: dict | None = None) -> dict:
+        params = {
             "processId": os.getpid(),
             "rootUri": root.as_uri(),
             "workspaceFolders": [{"uri": root.as_uri(), "name": root.name}],
@@ -145,11 +146,14 @@ class LspClient:
                 },
                 "workspace": {"workspaceFolders": True},
             },
-        }, timeout=timeout)
+        }
+        if options:
+            params["initializationOptions"] = options
+        result = await self.request("initialize", params, timeout=timeout)
         await self.notify("initialized", {})
         return result or {}
 
-    async def open_file(self, path: pathlib.Path, language_id: str = "python") -> str:
+    async def open_file(self, path: pathlib.Path, language_id: str = "plaintext") -> str:
         uri = path.as_uri()
         await self.notify("textDocument/didOpen", {
             "textDocument": {

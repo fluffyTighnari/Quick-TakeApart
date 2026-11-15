@@ -16,7 +16,7 @@ export function TracePanel() {
   const setTraceOpen = useApp((s) => s.setTraceOpen);
 
   if (!request) {
-    return <div className="empty"><strong>还没有查找</strong>在代码里 Ctrl+点击函数，或 Ctrl+点击关键字查找出现位置。</div>;
+    return <div className="empty"><strong>还没有查找</strong>在代码里 Ctrl+点击函数或变量，查看定义、引用和调用关系。</div>;
   }
 
   const locations = (result?.locations || result?.items || [])
@@ -51,7 +51,7 @@ export function TracePanel() {
             </button>
           ))}
           <span className="spacer" />
-          <span className="chip muted">{result?.engine === "lsp" ? "pyright LSP" : "索引近似"}</span>
+          <span className="chip muted">{result?.engine === "lsp" ? "LSP" : "索引近似"}</span>
         </div>
       </div>
 

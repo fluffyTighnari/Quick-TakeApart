@@ -1,4 +1,4 @@
-"""Local HTTP server: index a Python project and serve the reading observatory.
+"""Local HTTP server: index a source project and serve the reading observatory.
 
 The new API is organized around a directory-level workspace:
 
@@ -34,6 +34,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 from engine import build_index
 from engine.claims import claims_from_edges, verify
+from engine.languages import language_status
+from engine.llm_config import (LlmConfigError, activate_profile, config_view,
+                               create_profile, delete_profile, get_profile,
+                               list_models as llm_list_models, list_profiles,
+                               probe as llm_probe, providers as llm_providers,
+                               update_profile)
 from engine.plan import build_inventory, views_or_fallback
 from engine.store import (StoreError, check_staleness, delete_flow,
                           flows_with_staleness, load_flow, rename_flow,
@@ -56,15 +62,13 @@ from engine.trace import TraceService
 from engine.skeleton import (SkeletonError, delete_skeleton, explain_node,
                              generate_skeleton, list_skeletons, load_skeleton,
                              skeleton_record, skeletons_with_staleness)
-from engine.settings import (SettingsError, fetch_models, public_settings,
-                             resolve_credentials, save_settings)
+from engine.settings import public_settings, save_settings
 from engine.paths import PathError, browse_directories, normalize_path, root_locations
 from engine.picker import PickerError, pick_folder
 from engine.recent import load_recent, remember
 
 WEB = pathlib.Path(__file__).parent / "web"
 DIST = WEB / "dist"
-PYRIGHT = pathlib.Path(__file__).parent / "node_modules" / "pyright" / "langserver.index.js"
 
 SKIP_DIRS = ("spike/", "node_modules/", ".venv/", "venv/", "build/", "dist/")
 SCRATCH_FILES = ("test_", "verify_", "probe", "conftest")
@@ -137,7 +141,10 @@ def build_base_payload(idx) -> dict:
             for c in verified.accepted
         ]
 
-    files = sorted({s.relpath for s in idx.symbols.values() if s.id in symbols})
+    files = sorted({
+        *[f for f in idx.files if not _is_scratch(f)],
+        *[s.relpath for s in idx.symbols.values() if s.id in symbols],
+    })
     by_file: dict[str, list[str]] = {f: [] for f in files}
     for sid, sym in symbols.items():
         by_file[sym["file"]].append(sid)
@@ -157,6 +164,7 @@ def build_base_payload(idx) -> dict:
             "unresolved": sum(1 for c, _, _ in idx.unresolved_calls if c in symbols),
             "files": len(files),
         },
+        "languages": language_status(pathlib.Path(idx.root)),
         "symbols": symbols,
         "edges": edges,
         "claims": claims,
@@ -179,7 +187,7 @@ def index_project(root: pathlib.Path, max_symbols: int) -> None:
             old_trace.stop()
         except Exception:
             pass
-    idx = asyncio.run(build_index(root, PYRIGHT, max_call_hierarchy=max_symbols))
+    idx = asyncio.run(build_index(root, max_call_hierarchy=max_symbols))
     STATE["idx"] = idx
     STATE["base"] = build_base_payload(idx)
     STATE["inventory"] = build_inventory(idx)
@@ -189,7 +197,7 @@ def index_project(root: pathlib.Path, max_symbols: int) -> None:
     STATE["skeleton_inventory"] = build_inventory(
         idx, symbol_budget=900, compact=True)
     STATE["plan_cache"] = {}
-    STATE["trace"] = TraceService(root, PYRIGHT, idx)
+    STATE["trace"] = TraceService(root, idx)
     ensure_default_track(root)
 
     STATE["recent"] = remember(str(root))
@@ -410,7 +418,7 @@ class Handler(BaseHTTPRequestHandler):
                 "features": [
                     "workspace", "browse", "pick-folder", "tracks",
                     "skeletons", "slices", "regenerate-slice",
-                    "plan-chat", "threads", "trace", "settings",
+                    "plan-chat", "threads", "trace", "settings", "llm-profiles",
                 ],
                 "root": STATE["base"]["root"] if STATE["base"] else None,
                 "frontend": "dist",
@@ -462,6 +470,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "/api/settings":
             self._json({"settings": public_settings()})
+            return
+        if route == "/api/llm/providers":
+            self._json({"items": llm_providers()})
+            return
+        if route == "/api/llm/config":
+            self._json(config_view())
+            return
+        if route == "/api/llm/profiles":
+            self._json({"items": list_profiles()})
+            return
+        if route.startswith("/api/llm/profiles/"):
+            self.send_error(405)
             return
         if route == "/api/workspace":
             if STATE["base"] is None:
@@ -571,15 +591,56 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
+    def _llm_profile_action(self, route: str) -> tuple[str, str] | None:
+        prefix = "/api/llm/profiles/"
+        if not route.startswith(prefix):
+            return None
+        parts = [part for part in route[len(prefix):].split("/") if part]
+        if not parts:
+            return None
+        return urllib.parse.unquote(parts[0]), (parts[1] if len(parts) > 1 else "")
+
+    def _llm_error(self, exc: Exception) -> None:
+        text = str(exc)
+        status = 404 if text.startswith("没有这份配置") else 422
+        self._json({"detail": text}, status)
+
     def do_POST(self) -> None:
         parsed = urllib.parse.urlsplit(self.path)
         route = parsed.path
 
+        if route == "/api/llm/profiles":
+            try:
+                profile = create_profile(self._read_json())
+            except LlmConfigError as exc:
+                self._llm_error(exc)
+                return
+            self._json(profile, 201)
+            return
+        action = self._llm_profile_action(route)
+        if action and action[1] == "activate":
+            body = self._read_json()
+            try:
+                profile = activate_profile(action[0], body.get("model"))
+            except LlmConfigError as exc:
+                self._llm_error(exc)
+                return
+            self._json(profile)
+            return
+        if action and action[1] == "models":
+            try:
+                self._json(llm_list_models(action[0]))
+            except LlmConfigError as exc:
+                self._llm_error(exc)
+            return
+        if action and action[1] == "probe":
+            try:
+                self._json(llm_probe(action[0]))
+            except LlmConfigError as exc:
+                self._llm_error(exc)
+            return
         if route == "/api/settings":
             self._handle_save_settings()
-            return
-        if route == "/api/settings/models":
-            self._handle_list_models()
             return
         if route == "/api/skeletons/generate":
             self._handle_generate_skeleton()
@@ -667,6 +728,32 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
+    def do_PATCH(self) -> None:
+        route = urllib.parse.urlsplit(self.path).path
+        action = self._llm_profile_action(route)
+        if action and not action[1]:
+            try:
+                profile = update_profile(action[0], self._read_json())
+            except LlmConfigError as exc:
+                self._llm_error(exc)
+                return
+            self._json(profile)
+            return
+        self.send_error(405)
+
+    def do_DELETE(self) -> None:
+        route = urllib.parse.urlsplit(self.path).path
+        action = self._llm_profile_action(route)
+        if action and not action[1]:
+            try:
+                result = delete_profile(action[0])
+            except LlmConfigError as exc:
+                self._llm_error(exc)
+                return
+            self._json(result)
+            return
+        self.send_error(405)
+
     # --- tracks / threads ---
 
     def _handle_create_track(self) -> None:
@@ -726,19 +813,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": f"cannot save settings: {exc}"}, 500)
             return
         self._json({"settings": settings})
-
-    def _handle_list_models(self) -> None:
-        body = self._read_json()
-        base_url = str(body.get("baseUrl") or "").strip()
-        api_key = str(body.get("apiKey") or "").strip()
-        if not api_key:
-            api_key = resolve_credentials()[0]
-        try:
-            models = fetch_models(base_url, api_key)
-        except SettingsError as exc:
-            self._json({"error": str(exc)}, 422)
-            return
-        self._json({"models": models})
 
     # --- logical skeleton (stage one) ---
 
@@ -1269,8 +1343,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         service = STATE.get("trace")
         if service is None:
-            service = TraceService(pathlib.Path(STATE["base"]["root"]), PYRIGHT,
-                                   STATE["idx"])
+            service = TraceService(pathlib.Path(STATE["base"]["root"]), STATE["idx"])
             STATE["trace"] = service
         try:
             self._json(service.query(file, line, char, kind))
@@ -1596,11 +1669,42 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._json({
                 "error": f"索引失败：{exc}",
-                "hint": "确认目录可读、pyright 已安装，并且项目里至少有一个 Python 文件。",
+                "hint": "确认目录可读，并至少有一个受支持语言的源文件；对应语言的 LSP 需要已安装。",
                 "path": str(target),
             }, 500)
             return
         self._json(STATE["base"])
+
+
+def _exit_with_parent() -> None:
+    """Desktop shell watchdog.
+
+    The shell sets QTA_PARENT_PID to its own pid. If it is force-killed (Task
+    Manager, crash) we would otherwise linger forever with a bound port, so we
+    wait on the parent handle and hard-exit when it goes away. Only armed when
+    the env var is present, leaving CLI and Docker runs untouched.
+    """
+    import threading
+
+    pid = os.environ.get("QTA_PARENT_PID", "")
+    if sys.platform != "win32" or not pid.isdigit():
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        SYNCHRONIZE = 0x00100000
+        INFINITE = 0xFFFFFFFF
+        handle = kernel32.OpenProcess(SYNCHRONIZE, False, int(pid))
+        if not handle:
+            return
+
+        def watch() -> None:
+            kernel32.WaitForSingleObject(handle, INFINITE)
+            os._exit(0)
+
+        threading.Thread(target=watch, name="parent-watch", daemon=True).start()
+    except Exception:
+        return
 
 
 def main() -> int:
@@ -1612,9 +1716,7 @@ def main() -> int:
     ap.add_argument("--max-symbols", type=int, default=400)
     args = ap.parse_args()
 
-    if not PYRIGHT.exists():
-        print(f"pyright not found at {PYRIGHT}", file=sys.stderr)
-        return 2
+    _exit_with_parent()
 
     STATE["max_symbols"] = args.max_symbols
 

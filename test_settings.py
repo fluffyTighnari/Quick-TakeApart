@@ -37,7 +37,7 @@ def main() -> int:
             check("no key by default", public["hasKey"] is False)
             check("env key reported separately", public["envKey"] is False)
             check("default base URL", "deepseek" in public["baseUrl"])
-            check("default model", public["model"] == "deepseek-v4.1-flash")
+            check("default model", public["model"] == "deepseek-flash")
 
             print("\n=== save and mask ===")
             saved = save_settings({

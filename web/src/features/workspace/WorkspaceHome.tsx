@@ -12,6 +12,7 @@ function fmtDate(iso: string) {
 export function WorkspaceHome() {
   const navigate = useNavigate();
   const workspace = useApp((s) => s.workspace);
+  const base = useApp((s) => s.base);
   const track = useApp((s) => s.track);
   const activeTrackId = useApp((s) => s.activeTrackId);
   const selectSlice = useApp((s) => s.selectSlice);
@@ -73,17 +74,25 @@ export function WorkspaceHome() {
 
       {workspace.stats.files === 0 ? (
         <div className="notice bad" style={{ marginBottom: 12 }}>
-          这个目录里没有找到 Python 文件。当前索引器只支持 Python；请换一个包含
-          <code style={{ margin: "0 3px" }}>.py</code>
-          文件的目录，或等待后续语言支持。
+          这个目录里没有发现受支持的源文件（Python / TypeScript / JavaScript / Go），
+          或者对应语言的 LSP 尚未安装。
         </div>
       ) : null}
 
       <div className="row wrap reveal reveal-1" style={{ gap: 7, marginBottom: 8 }}>
         <span className="chip teal">{workspace.stats.files} 文件</span>
-        <span className="chip">{workspace.stats.callables} 函数</span>
+        <span className="chip">{workspace.stats.callables} 可调用符号</span>
         <span className="chip">{workspace.stats.edges} 调用边</span>
         <span className="chip muted">{workspace.stats.crossFile} 跨文件</span>
+        {(base?.languages || []).filter((lang) => lang.files > 0).map((lang) => (
+          <span
+            className={`chip ${lang.available ? "teal" : "amber"}`}
+            key={lang.id}
+            title={lang.available ? lang.command : "语言服务器未安装，只能浏览文件"}
+          >
+            {lang.label} · {lang.files}{lang.available ? "" : " · 未安装 LSP"}
+          </span>
+        ))}
         {current?.depth ? <span className="chip amber">粒度 · {current.depth}</span> : null}
       </div>
 
@@ -119,12 +128,12 @@ export function WorkspaceHome() {
           <div className="hc-num">03 · READ</div>
           <div className="hc-title">阅读台</div>
           <div className="hc-desc">
-            左侧目录切换流程/文件/函数，中间读代码，右侧看讲解与图表；支持全屏、选区提问，以及 Ctrl+点击函数/关键字查找。
+            左侧目录切换流程/文件/函数，中间读代码，右侧看讲解与图表；支持全屏、选区提问，以及 Ctrl+点击函数/变量查找。
           </div>
           <div className="hc-foot">
             <span className="chip">{workspace.slices.length} 切片</span>
             <span className="chip">全屏</span>
-            <span className="chip">函数/关键字查找</span>
+            <span className="chip">函数/变量查找</span>
           </div>
           <ArrowRight size={15} style={{ position: "absolute", right: 16, top: 16, color: "var(--teal)" }} />
         </button>

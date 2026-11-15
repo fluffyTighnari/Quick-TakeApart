@@ -29,23 +29,13 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import os
 import re
 from typing import Any, Literal
-
-try:
-    import anthropic
-except ImportError:  # pragma: no cover
-    anthropic = None  # type: ignore[assignment]
 
 from .model import Index
 
 ViewKind = Literal["path", "crosscut", "zones", "calltree"]
 VIEW_KINDS: tuple[ViewKind, ...] = ("path", "crosscut", "zones", "calltree")
-
-DEFAULT_MODEL = "deepseek-v4.1-flash"
-DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic"
-DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY"
 
 MAX_VIEWS = 3
 MAX_DEPTH = 12
@@ -521,23 +511,6 @@ def build_scoped_inventory(idx: Index, query: str = "",
     return "\n".join(lines)
 
 
-def load_credentials() -> tuple[str, str, str]:
-    from .settings import resolve_credentials
-    key, base, model = resolve_credentials()
-    if not key:
-        raise PlanError(
-            "no API key: open API settings in the top bar, or set "
-            f"{DEFAULT_KEY_ENV} / QTA_API_KEY."
-        )
-    return key, base, model
-
-
-def _client(key: str, base_url: str):
-    if anthropic is None:
-        raise PlanError("the anthropic package is not installed: pip install anthropic")
-    return anthropic.Anthropic(api_key=key, base_url=base_url)
-
-
 def request_views(
     idx: Index,
     query: str,
@@ -548,45 +521,20 @@ def request_views(
     model: str | None = None,
     max_tokens: int = 8000,
 ) -> ViewBundle:
-    if key is None or base_url is None or model is None:
-        k, b, m = load_credentials()
-        key = key or k
-        base_url = base_url or b
-        model = model or m
-
+    # key/base/model remain accepted for old callers; the active profile is
+    # authoritative now.
+    from .llm import LlmError, call_tool
     inv = inventory if inventory is not None else build_inventory(idx)
-
-    system = [
-        {"type": "text", "text": SYSTEM_PROMPT},
-        # the inventory is the large stable part; marking it cacheable means
-        # repeated questions about the same tree only pay for the question
-        {"type": "text", "text": inv, "cache_control": {"type": "ephemeral"}},
-    ]
-
-    client = _client(key, base_url)
     try:
-        resp = client.messages.create(
-            model=model,
+        raw = call_tool(
+            system_text=SYSTEM_PROMPT,
+            inventory=inv,
+            user_text=f"Question: {query}\n\nProduce the views.",
+            tool=VIEW_TOOL,
             max_tokens=max_tokens,
-            # this endpoint rejects tool_choice unless thinking is explicitly off
-            thinking={"type": "disabled"},
-            system=system,
-            tools=[VIEW_TOOL],
-            tool_choice={"type": "tool", "name": "emit_views"},
-            messages=[{"role": "user",
-                       "content": f"Question: {query}\n\nProduce the views."}],
         )
-    except Exception as exc:
-        raise PlanError(f"model call failed: {exc}") from exc
-
-    raw = next((b.input for b in resp.content if b.type == "tool_use"), None)
-    if raw is None:
-        text = next((b.text for b in resp.content if b.type == "text"), "")
-        raise PlanError(
-            f"model did not return views (stop_reason={resp.stop_reason}); "
-            f"text was: {text[:200]}"
-        )
-
+    except LlmError as exc:
+        raise PlanError(str(exc)) from exc
     return validate_views(raw, idx, query)
 
 

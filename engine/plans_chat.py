@@ -24,13 +24,7 @@ Two things the model may do besides editing:
 from __future__ import annotations
 
 import dataclasses
-import os
 from typing import Any, Literal
-
-try:
-    import anthropic
-except ImportError:  # pragma: no cover
-    anthropic = None  # type: ignore[assignment]
 
 from .model import Index
 from .plans import PlanItem, SavedPlan, PlanStoreError, find_cycle, validate_plan
@@ -41,10 +35,6 @@ OpKind = Literal["add_step", "remove_step", "update_step", "reorder",
 OP_KINDS: tuple[OpKind, ...] = (
     "add_step", "remove_step", "update_step", "reorder", "set_intent",
     "set_depth")
-
-DEFAULT_MODEL = "deepseek-v4.1-flash"
-DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic"
-DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY"
 
 MAX_OPS = 8
 
@@ -471,55 +461,22 @@ def apply_turn(plan: SavedPlan, turn: ChatTurn) -> tuple[SavedPlan, list[str]]:
     return updated, notes
 
 
-def load_credentials() -> tuple[str, str, str]:
-    from .settings import resolve_credentials
-    key, base, model = resolve_credentials()
-    if not key:
-        raise ChatError(
-            "no API key: open API settings in the top bar, or set "
-            f"{DEFAULT_KEY_ENV} / QTA_API_KEY"
-        )
-    return key, base, model
-
-
 def request_turn(message: str, plan: SavedPlan | None, flows: list[SavedFlow], *,
                  depth: str = "",
                  key: str | None = None, base_url: str | None = None,
                  model: str | None = None, max_tokens: int = 4000) -> ChatTurn:
-    if key is None or base_url is None or model is None:
-        k, b, m = load_credentials()
-        key = key or k
-        base_url = base_url or b
-        model = model or m
-
+    from .llm import LlmError, call_tool
     context = build_context(plan, flows, depth=depth)
-    system = [
-        {"type": "text", "text": SYSTEM_PROMPT},
-        # the plan and library are the stable part; cache them across turns
-        {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
-    ]
-
-    if anthropic is None:
-        raise ChatError("the anthropic package is not installed: pip install anthropic")
-
-    client = anthropic.Anthropic(api_key=key, base_url=base_url)
     try:
-        resp = client.messages.create(
-            model=model, max_tokens=max_tokens,
-            thinking={"type": "disabled"},
-            system=system,
-            tools=[PLAN_CHAT_TOOL],
-            tool_choice={"type": "tool", "name": "revise_plan"},
-            messages=[{"role": "user", "content": message}],
+        raw = call_tool(
+            system_text=SYSTEM_PROMPT,
+            inventory=context,
+            user_text=message,
+            tool=PLAN_CHAT_TOOL,
+            max_tokens=max_tokens,
         )
-    except Exception as exc:
-        raise ChatError(f"model call failed: {exc}") from exc
-
-    raw = next((b.input for b in resp.content if b.type == "tool_use"), None)
-    if raw is None:
-        text = next((b.text for b in resp.content if b.type == "text"), "")
-        raise ChatError(f"model returned no operations; text: {text[:160]}")
-
+    except LlmError as exc:
+        raise ChatError(str(exc)) from exc
     return parse_turn(raw, plan, {f.id for f in flows})
 
 

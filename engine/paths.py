@@ -86,7 +86,9 @@ def looks_like_project(path: pathlib.Path) -> bool:
     try:
         if any((path / marker).exists() for marker in PROJECT_MARKERS):
             return True
-        return next(path.glob("*.py"), None) is not None
+        from .languages import supported_extensions
+        return any(p.suffix.lower() in supported_extensions()
+                   for p in path.iterdir() if p.is_file())
     except OSError:
         return False
 

@@ -36,11 +36,22 @@ export interface Stats {
   files: number;
 }
 
+export interface LanguageStatus {
+  id: string;
+  label: string;
+  extensions: string[];
+  files: number;
+  available: boolean;
+  command: string;
+  source: string;
+}
+
 export interface BasePayload {
   root: string;
   name: string;
   revision: string;
   stats: Stats;
+  languages: LanguageStatus[];
   symbols: Record<string, Sym>;
   edges: Edge[];
   claims: Record<string, Claim[]>;
@@ -243,6 +254,50 @@ export interface Slice {
   };
 }
 
+export interface LlmProvider {
+  provider_id: string;
+  label: string;
+  kind: "openai" | "ollama" | "anthropic";
+  base_url: string;
+  needs_key: boolean;
+  supports_model_list: boolean;
+  default_model: string;
+  key_hint: string;
+  known_models: string[];
+  context_window?: number;
+}
+
+export interface LlmProfile {
+  profile_id: string;
+  label: string;
+  provider_id: string;
+  kind: LlmProvider["kind"];
+  base_url: string;
+  model: string;
+  models: string[];
+  think: "" | "true" | "false";
+  num_ctx: number;
+  effective_num_ctx: number;
+  is_active: boolean;
+  note: string;
+  has_key: boolean;
+  key_masked: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LlmConfigView {
+  active: Omit<LlmProfile, "has_key" | "key_masked"> & {
+    source?: string;
+    api_key?: string;
+    has_key?: boolean;
+  };
+  fallback: Record<string, unknown>;
+  env_loaded: boolean;
+  profiles_path: string;
+  secrets_path: string;
+}
+
 export interface ApiSettings {
   baseUrl: string;
   model: string;
@@ -250,6 +305,7 @@ export interface ApiSettings {
   keyHint: string;
   envKey?: boolean;
   envKeyHint?: string;
+  languageServers?: Record<string, string>;
   updatedAt: string;
   settingsPath: string;
 }

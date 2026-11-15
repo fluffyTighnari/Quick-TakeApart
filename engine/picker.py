@@ -16,6 +16,17 @@ class PickerError(RuntimeError):
     pass
 
 
+def _interpreter() -> str:
+    """Prefer pythonw.exe on Windows so the dialog does not drag a console along."""
+    exe = sys.executable
+    if not exe:
+        return exe
+    quiet = pathlib.Path(exe).with_name("pythonw.exe")
+    if quiet.is_file():
+        return str(quiet)
+    return exe
+
+
 def pick_folder(initial: str = "") -> str | None:
     """Open the OS folder dialog. Returns None if cancelled.
 
@@ -25,7 +36,7 @@ def pick_folder(initial: str = "") -> str | None:
     script = pathlib.Path(__file__).resolve()
     try:
         proc = subprocess.run(
-            [sys.executable, str(script), initial or ""],
+            [_interpreter(), str(script), initial or ""],
             capture_output=True,
             text=True,
             timeout=300,

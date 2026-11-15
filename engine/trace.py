@@ -1,9 +1,9 @@
-"""Hybrid trace service: index first, pyright LSP for the unknown.
+"""Hybrid trace service: index first, the file's LSP for the unknown.
 
 Ctrl+click needs to resolve arbitrary identifiers, not just the call edges the
-indexer happened to precompute. A warm pyright process gives real definition,
-references, and call hierarchy; the index remains the fast path and the fallback
-when the language server is unavailable.
+indexer happened to precompute. Warm language servers give real definitions,
+references and call hierarchy; the index remains the fast path and the fallback
+when a language server is unavailable.
 
 The service runs one asyncio loop in a daemon thread so the synchronous
 ThreadingHTTPServer can call it without each request paying process startup.
@@ -16,6 +16,7 @@ import pathlib
 import threading
 import urllib.parse
 
+from .languages import LanguageSpec, spec_for_path
 from .lsp import LspClient, LspError
 from .model import Index
 
@@ -34,20 +35,28 @@ def _rel_from_uri(root: pathlib.Path, uri: str) -> str:
 
 
 class TraceService:
-    def __init__(self, root: pathlib.Path, pyright_bin: pathlib.Path,
-                 idx: Index, timeout: float = 15.0):
+    def __init__(self, root: pathlib.Path, idx: Index,
+                 specs: list[LanguageSpec] | None = None,
+                 timeout: float = 15.0):
         self.root = root.resolve()
-        self.pyright_bin = pyright_bin
         self.idx = idx
+        self.specs = specs or []
         self.timeout = timeout
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
-        self._client: LspClient | None = None
-        self._opened: set[str] = set()
+        self._clients: dict[str, LspClient] = {}
+        self._opened: set[tuple[str, str]] = set()
         self._lock = asyncio.Lock()
         self._cache: dict[tuple, dict] = {}
-        self._started = False
-        self._project_files = {s.relpath for s in idx.symbols.values()}
+        self._project_files = set(idx.files) | {s.relpath for s in idx.symbols.values()}
+
+    def _spec(self, rel: str) -> LanguageSpec:
+        spec = spec_for_path(rel)
+        if spec is None:
+            raise LspError(f"no language server for {rel}")
+        if not spec.available:
+            raise LspError(f"{spec.label} language server is not installed")
+        return spec
 
     # --- lifecycle ------------------------------------------------------
 
@@ -81,31 +90,37 @@ class TraceService:
         self._loop.call_soon_threadsafe(self._loop.stop)
 
     async def _close(self) -> None:
-        if self._client is not None:
+        for client in self._clients.values():
             try:
-                await self._client.close()
-            finally:
-                self._client = None
-                self._opened.clear()
+                await client.close()
+            except Exception:
+                pass
+        self._clients.clear()
+        self._opened.clear()
 
-    async def _ensure_client(self) -> LspClient:
+    async def _ensure_client(self, spec: LanguageSpec) -> LspClient:
         async with self._lock:
-            if self._client is not None:
-                return self._client
-            client = LspClient(["node", str(self.pyright_bin), "--stdio"], self.root)
+            client = self._clients.get(spec.id)
+            if client is not None:
+                return client
+            if not spec.command:
+                raise LspError(f"{spec.label} language server is not configured")
+            client = LspClient(list(spec.command), self.root)
             await client.__aenter__()
-            await client.initialize(self.root)
-            self._client = client
+            await client.initialize(self.root, options=spec.initialization_options)
+            self._clients[spec.id] = client
             return client
 
-    async def _open(self, rel: str) -> str:
-        client = await self._ensure_client()
+    async def _open(self, rel: str) -> tuple[LspClient, str]:
+        spec = self._spec(rel)
+        client = await self._ensure_client(spec)
         path = (self.root / rel).resolve()
         uri = path.as_uri()
-        if rel not in self._opened:
-            await client.open_file(path)
-            self._opened.add(rel)
-        return uri
+        key = (spec.id, rel)
+        if key not in self._opened:
+            await client.open_file(path, spec.language_id)
+            self._opened.add(key)
+        return client, uri
 
     # --- mapping --------------------------------------------------------
 
@@ -174,8 +189,7 @@ class TraceService:
         return result
 
     async def _query(self, rel: str, line: int, char: int, kind: str) -> dict:
-        client = await self._ensure_client()
-        uri = await self._open(rel)
+        client, uri = await self._open(rel)
         position = {"line": max(0, line - 1), "character": max(0, char)}
         if kind == "definition":
             raw = await client.request("textDocument/definition", {

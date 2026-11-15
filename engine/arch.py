@@ -21,14 +21,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import os
 import re
 from typing import Any, Literal
-
-try:
-    import anthropic
-except ImportError:  # pragma: no cover
-    anthropic = None  # type: ignore[assignment]
 
 from .model import Index
 from .store import check_staleness
@@ -44,10 +38,6 @@ ARROW = {
     "emits": "..>>",
     "reads": "---",
 }
-
-DEFAULT_MODEL = "deepseek-v4.1-flash"
-DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic"
-DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY"
 
 MAX_MODULES = 14
 
@@ -365,15 +355,7 @@ def validate_architecture(raw: Any, idx: Index) -> Architecture:
     return arch
 
 
-def load_credentials() -> tuple[str, str, str]:
-    from .settings import resolve_credentials
-    key, base, model = resolve_credentials()
-    if not key:
-        raise ArchError(
-            "no API key: open API settings in the top bar, or set "
-            f"{DEFAULT_KEY_ENV} / QTA_API_KEY"
-        )
-    return key, base, model
+
 
 
 def request_architecture(idx: Index, focus: str = "", *,
@@ -382,40 +364,19 @@ def request_architecture(idx: Index, focus: str = "", *,
                          base_url: str | None = None,
                          model: str | None = None,
                          max_tokens: int = 8000) -> Architecture:
-    if key is None or base_url is None or model is None:
-        k, b, m = load_credentials()
-        key = key or k
-        base_url = base_url or b
-        model = model or m
-
+    from .llm import LlmError, call_tool
     inv = inventory if inventory is not None else build_inventory(idx)
-    system = [
-        {"type": "text", "text": SYSTEM_PROMPT},
-        {"type": "text", "text": inv, "cache_control": {"type": "ephemeral"}},
-    ]
-
     question = focus.strip() or "整体架构是怎样的"
-    if anthropic is None:
-        raise ArchError("the anthropic package is not installed: pip install anthropic")
-
-    client = anthropic.Anthropic(api_key=key, base_url=base_url)
     try:
-        resp = client.messages.create(
-            model=model, max_tokens=max_tokens,
-            thinking={"type": "disabled"},
-            system=system,
-            tools=[ARCH_TOOL],
-            tool_choice={"type": "tool", "name": "emit_architecture"},
-            messages=[{"role": "user",
-                       "content": f"关注点: {question}\n\n描述这个系统的架构。"}],
+        raw = call_tool(
+            system_text=SYSTEM_PROMPT,
+            inventory=inv,
+            user_text=f"关注点: {question}\n\n描述这个系统的架构。",
+            tool=ARCH_TOOL,
+            max_tokens=max_tokens,
         )
-    except Exception as exc:
-        raise ArchError(f"model call failed: {exc}") from exc
-
-    raw = next((b.input for b in resp.content if b.type == "tool_use"), None)
-    if raw is None:
-        text = next((b.text for b in resp.content if b.type == "text"), "")
-        raise ArchError(f"model did not return an architecture; text: {text[:160]}")
+    except LlmError as exc:
+        raise ArchError(str(exc)) from exc
     return validate_architecture(raw, idx)
 
 

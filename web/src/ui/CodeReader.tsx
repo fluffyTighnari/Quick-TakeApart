@@ -9,6 +9,58 @@ const PY_KEYWORDS = new Set([
   "async", "await", "match", "case",
 ]);
 
+const TS_KEYWORDS = new Set([
+  "const", "let", "var", "function", "return", "if", "else", "for",
+  "while", "do", "switch", "case", "default", "class", "interface",
+  "type", "enum", "namespace", "import", "from", "export", "extends",
+  "implements", "new", "try", "catch", "finally", "throw", "async",
+  "await", "yield", "public", "private", "protected", "static",
+  "readonly", "as", "in", "of", "instanceof", "typeof", "void", "null",
+  "undefined", "true", "false", "this", "super", "break", "continue",
+  "abstract", "declare", "keyof", "unknown", "never",
+]);
+
+const GO_KEYWORDS = new Set([
+  "package", "import", "func", "type", "struct", "interface", "var",
+  "const", "return", "if", "else", "for", "range", "go", "defer",
+  "chan", "select", "case", "switch", "break", "continue", "fallthrough",
+  "map", "make", "new", "nil", "true", "false", "iota", "default",
+]);
+
+function languageForFile(file: string): "python" | "typescript" | "go" | "generic" {
+  const ext = file.slice(file.lastIndexOf(".")).toLowerCase();
+  if ([".py", ".pyi"].includes(ext)) return "python";
+  if ([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].includes(ext)) return "typescript";
+  if (ext === ".go") return "go";
+  return "generic";
+}
+
+function keywordsFor(language: string): Set<string> {
+  if (language === "python") return PY_KEYWORDS;
+  if (language === "typescript") return TS_KEYWORDS;
+  if (language === "go") return GO_KEYWORDS;
+  return new Set();
+}
+
+function commentStart(line: string, language: string): number {
+  if (language === "generic") return -1;
+  let quote = "";
+  let escaped = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") { quote = ch; continue; }
+    if (language === "python" && ch === "#") return i;
+    if (language !== "python" && ch === "/" && line[i + 1] === "/") return i;
+  }
+  return -1;
+}
+
 const PY_TYPES = new Set([
   "int", "str", "float", "bool", "bytes", "list", "dict", "set", "tuple",
   "frozenset", "object", "type", "Any", "Optional", "Union", "Callable",
@@ -20,6 +72,7 @@ const TOKEN_RE = new RegExp([
   '("""[\\s\\S]*?"""|\'\'\'[\\s\\S]*?\'\'\')',
   '([rbfuRBFU]{0,2}"(?:[^"\\\\\\n]|\\\\.)*")',
   "([rbfuRBFU]{0,2}'(?:[^'\\\\\\n]|\\\\.)*')",
+  "(`(?:[^`\\\\]|\\\\.)*`)",
   "(@[A-Za-z_][\\w.]*)",
   "\\b(\\d+\\.?\\d*(?:[eE][-+]?\\d+)?)\\b",
   "([A-Za-z_]\\w*)",
@@ -33,23 +86,22 @@ type Tok = {
   word: boolean;
 };
 
-function tokenize(line: string): Tok[] {
+function tokenize(line: string, language: string): Tok[] {
   const out: Tok[] = [];
+  const cut = commentStart(line, language);
+  const code = cut >= 0 ? line.slice(0, cut) : line;
   let last = 0;
   let prevReal = "";
   let m: RegExpExecArray | null;
   TOKEN_RE.lastIndex = 0;
-  while ((m = TOKEN_RE.exec(line)) !== null) {
+  while ((m = TOKEN_RE.exec(code)) !== null) {
     if (m.index > last) {
-      out.push({ text: line.slice(last, m.index), cls: "tok-ghost", start: last, word: false });
+      out.push({ text: code.slice(last, m.index), cls: "tok-ghost", start: last, word: false });
     }
-    const [tok, com, tri, dstr, sstr, deco, num, ident, punct] = m;
+    const [tok, com, tri, dstr, sstr, bstr, deco, num, ident, punct] = m;
     let cls = "tok-ghost";
     let word = false;
-    if (com) {
-      cls = "tok-com";
-      prevReal = "comment";
-    } else if (tri || dstr || sstr) {
+    if (com || tri || dstr || sstr || bstr) {
       cls = "tok-str";
       prevReal = "str";
     } else if (deco) {
@@ -60,13 +112,14 @@ function tokenize(line: string): Tok[] {
       prevReal = "num";
     } else if (ident) {
       word = true;
-      if (PY_KEYWORDS.has(ident)) {
+      if (keywordsFor(language).has(ident)) {
         cls = "tok-key";
-        prevReal = ident === "def" || ident === "class" ? "def" : "kw";
+        prevReal = ["def", "class", "function", "func", "interface", "type"].includes(ident)
+          ? "def" : "kw";
       } else if (prevReal === "def") {
         cls = "tok-def";
         prevReal = "name";
-      } else if (ident === "self" || ident === "cls") {
+      } else if (ident === "self" || ident === "cls" || ident === "this") {
         cls = "tok-self";
         prevReal = "name";
       } else if (PY_TYPES.has(ident) || /^[A-Z][A-Za-z0-9_]*$/.test(ident)) {
@@ -86,18 +139,19 @@ function tokenize(line: string): Tok[] {
     out.push({ text: tok, cls, start: m.index, word });
     last = m.index + tok.length;
   }
-  if (last < line.length) {
-    out.push({ text: line.slice(last), cls: "tok-ghost", start: last, word: false });
+  if (last < code.length) {
+    out.push({ text: code.slice(last), cls: "tok-ghost", start: last, word: false });
+  }
+  if (cut >= 0) {
+    out.push({ text: line.slice(cut), cls: "tok-com", start: cut, word: false });
   }
   return out;
 }
 
 function isTraceable(tok: Tok): boolean {
-  // Reading lookup is deliberately narrow: functions/classes and language
-  // keywords. Variables, self, literals and arbitrary words are not traceable.
-  return tok.word && (
-    tok.cls === "tok-call" || tok.cls === "tok-def" || tok.cls === "tok-key"
-  );
+  // Functions/types and variables/identifiers are traceable. Language
+  // keywords and self/cls are not useful lookup targets.
+  return tok.word && tok.cls !== "tok-key" && tok.cls !== "tok-self";
 }
 
 function lineFromNode(node: Node | null): number | null {
@@ -161,20 +215,13 @@ export function CodeReader({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<(SelectionContext & { x: number; y: number }) | null>(null);
-  const [keywordHit, setKeywordHit] = useState<string | null>(null);
 
+  const language = useMemo(() => languageForFile(file), [file]);
   const lines = useMemo(() => text.replace(/\r\n/g, "\n").split("\n"), [text]);
-  const tokenLines = useMemo(() => lines.map((line) => tokenize(line)), [lines]);
-  const keywordCount = useMemo(
-    () => keywordHit
-      ? tokenLines.flat().filter((tok) => tok.cls === "tok-key" && tok.text === keywordHit).length
-      : 0,
-    [tokenLines, keywordHit],
+  const tokenLines = useMemo(
+    () => lines.map((line) => tokenize(line, language)),
+    [lines, language],
   );
-
-  useEffect(() => {
-    setKeywordHit(null);
-  }, [file]);
   const defsByLine = useMemo(() => {
     const map = new Map<number, string>();
     for (const sym of Object.values(symbols)) {
@@ -235,11 +282,6 @@ export function CodeReader({
   function traceToken(lineNo: number, tok: Tok, event: React.MouseEvent) {
     if (!(event.ctrlKey || event.metaKey) || !isTraceable(tok)) return;
     event.preventDefault();
-    if (tok.cls === "tok-key") {
-      // Keywords are a local find, not a language-server definition request.
-      setKeywordHit((current) => current === tok.text ? null : tok.text);
-      return;
-    }
     onTrace?.(file, lineNo, tok.start);
   }
 
@@ -257,13 +299,7 @@ export function CodeReader({
         <span className="sep">/</span>
         <span>{lines.length} 行</span>
         <span className="grow" />
-        {keywordHit ? (
-          <span className="code-keyword-hit">
-            关键字 {keywordHit} · {keywordCount} 处
-            <button onClick={() => setKeywordHit(null)}>清除</button>
-          </span>
-        ) : null}
-        <span className="muted">Ctrl+点击函数/关键字 · 选中提问</span>
+        <span className="muted">Ctrl+点击函数/变量 · 选中提问</span>
       </div>
       <div
         className={`code-scroll${showAll ? " tall" : ""}`}
@@ -293,21 +329,15 @@ export function CodeReader({
               <span className="src">
                 {tokens.map((tok, i) => {
                   const traceable = isTraceable(tok);
-                  const keywordHitHere = !!keywordHit
-                    && tok.cls === "tok-key" && tok.text === keywordHit;
-                  const title = !traceable ? undefined
-                    : tok.cls === "tok-key"
-                      ? "Ctrl+点击查找关键字出现位置"
-                      : "Ctrl+点击查找函数定义与引用";
                   return (
                     <span
                       key={i}
-                      className={`${tok.cls}${tok.word ? " tok-word" : ""}${traceable ? " traceable" : ""}${keywordHitHere ? " keyword-hit" : ""}`}
+                      className={`${tok.cls}${tok.word ? " tok-word" : ""}${traceable ? " traceable" : ""}`}
                       onClick={(e) => {
                         if (e.ctrlKey || e.metaKey) traceToken(lineNo, tok, e);
                         else clickToken(lineNo, tok, e);
                       }}
-                      title={title}
+                      title={traceable ? "Ctrl+点击查找函数/变量定义与引用" : undefined}
                     >
                       {tok.text || " "}
                     </span>

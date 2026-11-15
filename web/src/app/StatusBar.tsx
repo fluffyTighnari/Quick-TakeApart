@@ -37,7 +37,7 @@ export function StatusBar() {
         </span>
       ) : null}
       <span className="st-item">Ctrl/Cmd+K 命令</span>
-      <span className="st-item">Ctrl+点击函数/关键字</span>
+      <span className="st-item">Ctrl+点击函数/变量</span>
     </footer>
   );
 }

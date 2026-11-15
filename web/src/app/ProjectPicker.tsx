@@ -169,8 +169,8 @@ export function ProjectPicker({ error }: { error: string | null }) {
         ) : null}
 
         <div className="hint">
-          提示：索引使用本地 pyright 语言服务器。大项目第一次打开会慢一些；
-          之后骨架、切片、对话都直接读磁盘，不会重新调用模型。
+          提示：索引使用本地语言服务器（Python / TypeScript / Go，自动检测）。
+          大项目第一次打开会慢一些；之后骨架、切片、对话都直接读磁盘，不会重新调用模型。
           {defaultRoot ? <span style={{ display: "block", marginTop: 4 }}>默认目录：{defaultRoot}</span> : null}
         </div>
       </div>

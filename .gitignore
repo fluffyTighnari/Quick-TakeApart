@@ -28,13 +28,26 @@ dist/
 build/
 *.egg-info/
 
-# Generated screenshots and captures (documentation source stays in docs/)
+# Tauri desktop runtime/build artifacts
+desktop/node_modules/
+desktop/dist/
+desktop/.tools/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/runtime/
+desktop/build-release.log
+
+# Generated images/screenshots; source icons are explicit exceptions
 *.png
 *.jpg
 *.jpeg
 *.webp
 *.gif
 *.svg
+!desktop/src-tauri/icons/**
+!desktop/icon-source.png
+
+# Browser/test captures
 .playwright/
 
 # Editor / OS
@@ -45,6 +58,3 @@ Thumbs.db
 .claude/
 .stfolder/
 .stignore
-
-# Local Docker overrides
-docker-compose.override.yml
