@@ -8,6 +8,7 @@ a tool schema and text.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -17,7 +18,7 @@ try:
 except ImportError:  # pragma: no cover
     anthropic = None  # type: ignore[assignment]
 
-from .llm_config import resolve_active
+from .llm_config import OPENCODE_SESSION, USER_AGENT, resolve_active
 
 
 class LlmError(RuntimeError):
@@ -32,29 +33,153 @@ def credentials() -> tuple[str, str, str]:
     return key, str(cfg.get("base_url") or ""), str(cfg.get("model") or "")
 
 
+_FENCE = re.compile(r"^```(?:[A-Za-z]+)?\s*|\s*```$")
+
+
+def _balance_json(text: str) -> str:
+    """Terminate an open string and close whatever containers are still open."""
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack:
+            stack.pop()
+    out = text
+    while out and (out[-1] in ",:" or out[-1].isspace()):
+        out = out[:-1]
+    if in_string:
+        out += '"'
+    return out + "".join(reversed(stack))
+
+
+def _last_separator(text: str) -> int:
+    """Index of the last comma or colon outside a string, or -1."""
+    in_string = False
+    escaped = False
+    found = -1
+    for i, ch in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in ",:":
+            found = i
+    return found
+
+
+def _salvage_json(text: str) -> Any:
+    """Recover tool arguments that arrived wrapped, truncated or slightly broken.
+
+    Gateways differ: some fence the arguments in markdown, some stop mid-object
+    when the output budget runs out. Both are normal enough that losing the whole
+    result to a JSON error would be wasteful. We first take the last complete
+    object, then close a truncated one, and finally drop the incomplete trailing
+    member (a half-written key or value) and close again.
+    """
+    body = _FENCE.sub("", text.strip())
+    start = body.find("{")
+    if start < 0:
+        return None
+    body = body[start:]
+
+    # A complete object followed by stray text is the easiest case: keep the
+    # object and ignore the tail.
+    stack_depth = 0
+    in_str = False
+    esc = False
+    closed_at = -1
+    for i, ch in enumerate(body):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack_depth += 1
+        elif ch in "}]":
+            stack_depth -= 1
+            if stack_depth == 0:
+                closed_at = i
+    if closed_at > 0:
+        try:
+            return json.loads(body[:closed_at + 1])
+        except json.JSONDecodeError:
+            pass
+
+    trimmed = body
+    for attempt in range(12):
+        candidate = _balance_json(trimmed)
+        for cleaned in (candidate, re.sub(r",\s*([}\]])", r"\1", candidate)):
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                continue
+        cut = _last_separator(trimmed)
+        if cut <= 0:
+            break
+        trimmed = trimmed[:cut]
+    return None
+
+
 def _tool_input(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict) and isinstance(raw.get("input"), dict):
         raw = raw["input"]
     if isinstance(raw, str):
+        text = raw
         try:
-            raw = json.loads(raw)
+            raw = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise LlmError(f"model returned invalid tool JSON: {exc}") from exc
+            raw = _salvage_json(text)
+            if raw is None:
+                raise LlmError(
+                    "model returned invalid tool JSON: "
+                    f"{exc}; head={text[:120]!r} tail={text[-120:]!r}") from exc
     if not isinstance(raw, dict):
         raise LlmError("model returned no tool input")
     return raw
 
 
 def _post(url: str, key: str, payload: dict, timeout: float) -> dict:
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+        headers["x-api-key"] = key
+    # opencode's gateway rejects untagged chat calls with 400 MissingSessionID;
+    # one id per process keeps its routing/caching behaviour.
+    if "opencode.ai" in url:
+        headers["x-opencode-session"] = OPENCODE_SESSION
+
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            **({"Authorization": f"Bearer {key}"} if key else {}),
-            **({"x-api-key": key} if key else {}),
-        },
+        headers=headers,
         method="POST",
     )
     try:

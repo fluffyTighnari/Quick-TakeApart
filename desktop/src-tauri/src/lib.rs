@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -69,7 +70,11 @@ pub fn run() {
                     if healthy {
                         open_main(&app_handle, port);
                     } else {
-                        set_splash_text(&app_handle, "引擎启动超时，日志见 %LOCALAPPDATA%\\Quick-TakeApart\\backend.log");
+                        let hint = log_path_hint();
+                        set_splash_text(
+                            &app_handle,
+                            &format!("引擎启动超时，日志见 {hint}"),
+                        );
                     }
                 });
             });
@@ -126,8 +131,9 @@ fn show_fatal(app: tauri::AppHandle, message: String) {
     set_splash_text(&app, &message);
 }
 
-/// Resource layout produced by `prepare-runtime.ps1`:
-/// `runtime/{server/{serve.py,engine,web/dist,node_modules/pyright},node/node.exe,python/}`
+/// Resource layout produced by `prepare-runtime.ps1` (Windows) or
+/// `prepare-runtime.mac.sh` (macOS):
+/// `runtime/{server/{serve.py,engine,web/dist,node_modules/pyright},node/<node>,python/<interpreter>}`
 fn find_runtime() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
@@ -135,6 +141,8 @@ fn find_runtime() -> Option<PathBuf> {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("runtime"));
             candidates.push(dir.join("resources").join("runtime"));
+            // macOS .app bundle: Contents/MacOS/<exe>, resources in Contents/Resources.
+            candidates.push(dir.join("..").join("Resources").join("runtime"));
             // `cargo run` puts the binary in target/debug, four levels below src-tauri.
             candidates.push(dir.join("../../../src-tauri/runtime"));
         }
@@ -148,8 +156,23 @@ fn find_runtime() -> Option<PathBuf> {
 
 fn is_runtime_root(path: &Path) -> bool {
     path.join("server").join("serve.py").is_file()
-        && path.join("python").join("python.exe").is_file()
-        && path.join("node").join("node.exe").is_file()
+        && python_exe(path).is_file()
+        && node_exe(path).is_file()
+}
+
+/// Bundled interpreter: `python/python.exe` on Windows, `python/bin/python3` elsewhere.
+fn python_exe(runtime: &Path) -> PathBuf {
+    if cfg!(windows) {
+        runtime.join("python").join("python.exe")
+    } else {
+        runtime.join("python").join("bin").join("python3")
+    }
+}
+
+/// Bundled node binary, used to launch pyright.
+fn node_exe(runtime: &Path) -> PathBuf {
+    let name = if cfg!(windows) { "node.exe" } else { "node" };
+    runtime.join("node").join(name)
 }
 
 fn free_port() -> u16 {
@@ -159,18 +182,38 @@ fn free_port() -> u16 {
         .unwrap_or(0)
 }
 
+fn log_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|base| PathBuf::from(base).join("Quick-TakeApart"))
+    } else {
+        std::env::var("HOME")
+            .ok()
+            .map(|home| {
+                PathBuf::from(home)
+                    .join("Library")
+                    .join("Application Support")
+                    .join("Quick-TakeApart")
+            })
+    }
+}
+
+fn log_path_hint() -> String {
+    match log_dir() {
+        Some(dir) => dir.join("backend.log").display().to_string(),
+        None => "backend.log".to_string(),
+    }
+}
+
 fn log_file() -> Option<File> {
-    let dir = std::env::var("LOCALAPPDATA").ok().map(|base| {
-        PathBuf::from(base).join("Quick-TakeApart")
-    })?;
+    let dir = log_dir()?;
     std::fs::create_dir_all(&dir).ok()?;
     File::create(dir.join("backend.log")).ok()
 }
 
 fn spawn_backend(dir: &Path, port: u16) -> std::io::Result<Child> {
-    use std::os::windows::process::CommandExt;
-
-    let python = dir.join("python").join("python.exe");
+    let python = python_exe(dir);
     let server = dir.join("server");
     let node_dir = dir.join("node");
 
@@ -190,8 +233,13 @@ fn spawn_backend(dir: &Path, port: u16) -> std::io::Result<Child> {
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW);
+        .stdout(Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
     match log_file() {
         Some(file) => {
@@ -206,8 +254,73 @@ fn spawn_backend(dir: &Path, port: u16) -> std::io::Result<Child> {
 }
 
 fn prepend_path(node_dir: &Path) -> String {
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    let mut parts: Vec<String> = vec![node_dir.display().to_string()];
+
+    // A Finder-launched .app inherits launchd's PATH, which is only
+    // /usr/bin:/bin:/usr/sbin:/sbin. None of the user's toolchains (go, gopls,
+    // homebrew, cargo) are visible there, so a language server installed by
+    // `go install` looks "missing" even though the shell finds it. Rebuild the
+    // login-shell path the same way path_helper does, then add per-user dirs.
+    #[cfg(not(windows))]
+    {
+        parts.extend(shell_search_paths());
+    }
+
     let existing = std::env::var("PATH").unwrap_or_default();
-    format!("{};{}", node_dir.display(), existing)
+    if !existing.is_empty() {
+        parts.push(existing);
+    }
+    parts.join(&sep.to_string())
+}
+
+#[cfg(not(windows))]
+fn shell_search_paths() -> Vec<String> {
+    fn push(out: &mut Vec<String>, value: &str) {
+        let value = value.trim();
+        if !value.is_empty() && !out.iter().any(|seen| seen == value) {
+            out.push(value.to_string());
+        }
+    }
+
+    let mut out: Vec<String> = Vec::new();
+
+    // /etc/paths plus /etc/paths.d/<name>: this is what path_helper feeds login
+    // shells, and it is where the Go pkg installer puts /usr/local/go/bin.
+    let mut files: Vec<std::path::PathBuf> = vec![std::path::PathBuf::from("/etc/paths")];
+    if let Ok(entries) = std::fs::read_dir("/etc/paths.d") {
+        for entry in entries.flatten() {
+            files.push(entry.path());
+        }
+    }
+    files.sort();
+    for file in files {
+        if let Ok(text) = std::fs::read_to_string(&file) {
+            for line in text.lines() {
+                push(&mut out, line);
+            }
+        }
+    }
+
+    // Per-user and package-manager locations that no shell profile guarantees.
+    let home = std::env::var("HOME").unwrap_or_default();
+    for dir in [
+        "go/bin",
+        ".local/bin",
+        ".cargo/bin",
+        "Library/pnpm",
+        ".npm-global/bin",
+    ] {
+        if !home.is_empty() {
+            push(&mut out, &format!("{home}/{dir}"));
+        }
+    }
+    for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/local/go/bin", "/opt/local/bin"] {
+        push(&mut out, dir);
+    }
+
+    out.retain(|dir| std::path::Path::new(dir).is_dir());
+    out
 }
 
 fn probe_health(port: u16) -> bool {

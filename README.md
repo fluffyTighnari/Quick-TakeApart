@@ -53,8 +53,8 @@ Java 和 C/C++ 的语言服务器体积较大，所以没有打进安装包：�
 
 | 版本 | 下载 | 说明 |
 | --- | --- | --- |
-| 安装版 | [Quick-TakeApart_2.1.0_x64-setup.exe](desktop/dist/Quick-TakeApart_2.1.0_x64-setup.exe) | 装到当前用户目录，不需要管理员权限，装完从桌面或开始菜单打开 |
-| 便携版 | [Quick-TakeApart_2.1.0_x64-portable.zip](desktop/dist/Quick-TakeApart_2.1.0_x64-portable.zip) | 解压到任意目录，运行里面的 `Quick-TakeApart.exe`；删掉整个文件夹就等于卸载 |
+| 安装版 | [Quick-TakeApart_2.1.0_x64-setup.exe](https://github.com/fluffyTighnari/Quick-TakeApart/releases/download/v2.1.0/Quick-TakeApart_2.1.0_x64-setup.exe) | 装到当前用户目录，不需要管理员权限，装完从桌面或开始菜单打开 |
+| 便携版 | [Quick-TakeApart_2.1.0_x64-portable.zip](https://github.com/fluffyTighnari/Quick-TakeApart/releases/download/v2.1.0/Quick-TakeApart_2.1.0_x64-portable.zip) | 解压到任意目录，运行里面的 `Quick-TakeApart.exe`；删掉整个文件夹就等于卸载 |
 
 安装包只包含 Python 阅读所需的部分，Java 与 C/C++ 的语言包在应用内按需下载（见上一节）。
 

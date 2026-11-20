@@ -4,6 +4,8 @@ import {
   ArrowRight, BookOpen, Plus, RefreshCw, Sparkles,
 } from "lucide-react";
 import { useApp } from "../../core/store";
+import { trackPath } from "../../core/routes";
+import { plainText } from "../../core/text";
 import type { Skeleton, SkeletonNode } from "../../types";
 import { RichText } from "../../ui/RichText";
 
@@ -14,6 +16,7 @@ export function SkeletonNodePanel() {
   const activeSkeletonId = useApp((s) => s.activeSkeletonId);
   const activeNodeId = useApp((s) => s.activeSkeletonNodeId);
   const busy = useApp((s) => s.busy);
+  const explaining = busy?.startsWith("正在生成节点讲解") || false;
   const explain = useApp((s) => s.explainSkeletonNode);
   const importNode = useApp((s) => s.importSkeletonNode);
   const generateSlice = useApp((s) => s.generateSlice);
@@ -40,7 +43,7 @@ export function SkeletonNodePanel() {
       <div>
         <div className="panel-flat panel-body" style={{ marginBottom: 12 }}>
           <div className="panel-title" style={{ fontSize: 17 }}>{skeleton.title}</div>
-          <p className="small muted" style={{ marginTop: 5 }}>{skeleton.overview}</p>
+          <p className="small muted" style={{ marginTop: 5 }}>{plainText(skeleton.overview)}</p>
           <div className="row wrap" style={{ gap: 5, marginTop: 8 }}>
             <span className="chip teal">{skeleton.main.length} 主流程</span>
             <span className="chip">{skeleton.support.length} 并行支撑</span>
@@ -67,36 +70,47 @@ export function SkeletonNodePanel() {
 
   async function makeSlice(andPlan: boolean) {
     if (!skeleton || !node) return;
-    if (andPlan) {
-      await generateBind({
-        query: queryForNode(node),
-        stepId: `sk-${node.id}`,
-        goal: node.title,
-        after: [],
-        granularity: track?.track.depth || "结构",
-        skippable: isSupport ? "平行支撑，可按需跳过" : "",
-        skeletonId: skeleton.id,
-        nodeId: node.id,
-      });
-    } else {
-      await generateSlice(queryForNode(node), {
-        scope: {
-          kind: "skeleton-node",
+    try {
+      let sliceId: string | null = null;
+      if (andPlan) {
+        const created = await generateBind({
+          query: queryForNode(node),
+          stepId: `sk-${node.id}`,
+          goal: node.title,
+          after: [],
+          granularity: track?.track.depth || "结构",
+          skippable: isSupport ? "平行支撑，可按需跳过" : "",
           skeletonId: skeleton.id,
           nodeId: node.id,
-          label: node.title,
-        },
-      });
+        });
+        sliceId = created.id;
+      } else {
+        const created = await generateSlice(queryForNode(node), {
+          scope: {
+            kind: "skeleton-node",
+            skeletonId: skeleton.id,
+            nodeId: node.id,
+            label: node.title,
+          },
+        });
+        sliceId = created.id;
+      }
+      setStage("read");
+      if (track) navigate(trackPath(track.track.id, "read", sliceId));
+    } catch {
+      /* the status bar shows the failure */
     }
-    setStage("read");
-    if (track) navigate(`/track/${track.track.id}/read`);
   }
 
   async function addPending() {
     if (!skeleton || !node) return;
-    await importNode(skeleton.id, node.id);
-    setStage("plan");
-    if (track) navigate(`/track/${track.track.id}/plan`);
+    try {
+      await importNode(skeleton.id, node.id);
+      setStage("plan");
+      if (track) navigate(trackPath(track.track.id, "plan"));
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   function openSymbol(sid: string) {
@@ -104,13 +118,13 @@ export function SkeletonNodePanel() {
     if (!file) return;
     void openCode(file, sid);
     setStage("read");
-    if (track) navigate(`/track/${track.track.id}/read`);
+    if (track) navigate(trackPath(track.track.id, "read"));
   }
 
   function openFile(file: string) {
     void openCode(file);
     setStage("read");
-    if (track) navigate(`/track/${track.track.id}/read`);
+    if (track) navigate(trackPath(track.track.id, "read"));
   }
 
   return (
@@ -122,7 +136,7 @@ export function SkeletonNodePanel() {
               {isSupport ? "平行支撑节点" : `主流程 · 第 ${mainIndex + 1} 步`}
             </div>
             <div className="panel-title" style={{ fontSize: 20 }}>{node.title}</div>
-            <p className="small" style={{ marginTop: 6 }}>{node.summary}</p>
+            <p className="small" style={{ marginTop: 6 }}>{plainText(node.summary)}</p>
           </div>
           {node.phase ? <span className="chip amber">{node.phase}</span> : null}
         </div>
@@ -146,7 +160,7 @@ export function SkeletonNodePanel() {
 
       {node.files.length ? (
         <div className="panel-flat panel-body" style={{ marginBottom: 12 }}>
-          <div className="rail-label" style={{ paddingLeft: 0 }}>相关文件</div>
+          <div className="panel-label">相关文件</div>
           <div className="col" style={{ gap: 4 }}>
             {node.files.map((file) => (
               <button key={file} className="rail-artifact" onClick={() => openFile(file)}>
@@ -159,7 +173,7 @@ export function SkeletonNodePanel() {
 
       <div className="panel-flat panel-body">
         <div className="row" style={{ marginBottom: 8 }}>
-          <div className="rail-label" style={{ paddingLeft: 0, margin: 0 }}>节点讲解</div>
+          <div className="panel-label">节点讲解</div>
           <span className="spacer" />
           {node.detail ? (
             <button className="btn btn-xs btn-ghost" disabled={!!busy}
@@ -176,7 +190,7 @@ export function SkeletonNodePanel() {
             onSymbol={openSymbol}
             onLocation={openFile}
           />
-        ) : busy ? (
+        ) : explaining ? (
           <div className="loading">正在生成节点讲解…</div>
         ) : (
           <div className="empty" style={{ padding: 18 }}>
@@ -196,7 +210,7 @@ export function SkeletonNodePanel() {
         <span className="spacer" />
         <button className="btn btn-sm btn-ghost" onClick={() => {
           setStage("plan");
-          if (track) navigate(`/track/${track.track.id}/plan`);
+          if (track) navigate(trackPath(track.track.id, "plan"));
         }}>
           去计划 <ArrowRight size={12} />
         </button>

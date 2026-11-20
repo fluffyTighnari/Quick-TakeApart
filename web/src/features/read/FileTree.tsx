@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileCode2, Search } from "lucide-react";
 import { useApp } from "../../core/store";
+import { trackPath } from "../../core/routes";
 
 export function FileTree() {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ export function FileTree() {
   async function open(file: string) {
     await openCode(file);
     setStage("read");
-    if (track) navigate(`/track/${track.track.id}/read`);
+    if (track) navigate(trackPath(track.track.id, "read"));
   }
 
   let currentDir: string | null = null;

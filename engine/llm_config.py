@@ -14,6 +14,7 @@ import re
 import secrets
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +23,12 @@ from .settings import load_settings, mask_key, settings_path
 
 CONFIG_DIR = ".qta"
 FORMAT_VERSION = 1
+# Sent on every outbound model request: Cloudflare in front of some gateways
+# (opencode.ai among them) rejects the bare "Python-urllib/x.y" agent with 403.
+USER_AGENT = "Quick-TakeApart/2.1"
+# The same gateway wants an x-opencode-session tag on chat calls (400
+# MissingSessionID otherwise); one per app run is enough for its routing.
+OPENCODE_SESSION = str(uuid.uuid4())
 PROFILE_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 THINK_VALUES = ("", "true", "false")
 
@@ -484,7 +491,13 @@ def config_view() -> dict:
 def _request_json(url: str, key: str, *, method: str = "GET",
                   payload: dict | None = None, timeout: int = 12) -> Any:
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        # opencode.ai sits behind Cloudflare, which answers 403 (error 1010) to
+        # the default "Python-urllib/x.y" agent. Any explicit UA passes.
+        "User-Agent": USER_AGENT,
+    }
     if key:
         headers["Authorization"] = f"Bearer {key}"
         headers["x-api-key"] = key

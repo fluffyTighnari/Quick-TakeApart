@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Boxes, FileCode2, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { api } from "../../core/api";
 import { useApp } from "../../core/store";
+import { trackPath } from "../../core/routes";
+import { plainText } from "../../core/text";
 import type { Skeleton, Slice } from "../../types";
 
 function fmtDate(iso: string) {
@@ -17,12 +19,13 @@ export function LibraryView() {
   const workspace = useApp((s) => s.workspace);
   const track = useApp((s) => s.track);
   const activeTrackId = useApp((s) => s.activeTrackId);
-  const selectSlice = useApp((s) => s.selectSlice);
+  const openSlice = useApp((s) => s.openSlice);
   const selectSkeleton = useApp((s) => s.selectSkeleton);
   const setStage = useApp((s) => s.setStage);
   const generateSlice = useApp((s) => s.generateSlice);
   const refreshWorkspace = useApp((s) => s.refreshWorkspace);
   const selectTrack = useApp((s) => s.selectTrack);
+  const setError = useApp((s) => s.setError);
   const [query, setQuery] = useState("");
   const [strategy, setStrategy] = useState("");
   const [trackFilter, setTrackFilter] = useState("");
@@ -52,37 +55,56 @@ export function LibraryView() {
 
   const showSlices = kind !== "skeleton";
   const showSkeletons = kind !== "slice";
+  const nothingVisible = (!showSlices || !filteredSlices.length)
+    && (!showSkeletons || !filteredSkeletons.length);
 
-  async function openSlice(slice: Slice) {
-    await selectSlice(slice.id);
+  async function openSliceCard(slice: Slice) {
+    const trackId = await openSlice(slice);
+    if (!trackId) return;
     setStage("read");
-    if (activeTrackId) navigate(`/track/${activeTrackId}/read/${slice.id}`);
+    navigate(trackPath(trackId, "read", slice.id));
   }
 
   function openSkeleton(skeleton: Skeleton) {
     selectSkeleton(skeleton.id);
     setStage("architecture");
-    if (activeTrackId) navigate(`/track/${activeTrackId}/architecture`);
+    if (activeTrackId) navigate(trackPath(activeTrackId, "architecture"));
   }
 
   async function removeSlice(slice: Slice) {
     if (!confirm(`删除切片「${slice.title}」？计划里的引用会变成悬空。`)) return;
-    await api.deleteSlice(slice.id);
-    await refreshWorkspace();
-    if (track) await selectTrack(track.track.id);
+    try {
+      await api.deleteSlice(slice.id);
+      await refreshWorkspace();
+      if (track) await selectTrack(track.track.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function removeSkeleton(skeleton: Skeleton) {
     if (!confirm(`删除骨架「${skeleton.title}」？`)) return;
-    await api.deleteSkeleton(skeleton.id);
-    if (track) await selectTrack(track.track.id);
+    try {
+      await api.deleteSkeleton(skeleton.id);
+      if (track) await selectTrack(track.track.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function newSlice() {
     const q = window.prompt("想切出什么问题？", "");
     if (!q) return;
-    const slice = await generateSlice(q);
-    if (slice && activeTrackId) navigate(`/track/${activeTrackId}/read/${slice.id}`);
+    try {
+      const slice = await generateSlice(q);
+      const trackId = slice?.trackId || activeTrackId;
+      if (slice && trackId) {
+        setStage("read");
+        navigate(trackPath(trackId, "read", slice.id));
+      }
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   return (
@@ -148,26 +170,40 @@ export function LibraryView() {
           </div>
           <div className="lib-grid">
             {filteredSkeletons.map((skeleton) => (
-              <button className="lib-card reveal" key={skeleton.id} onClick={() => openSkeleton(skeleton)}>
+              <div
+                className="lib-card reveal"
+                key={skeleton.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => openSkeleton(skeleton)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openSkeleton(skeleton);
+                  }
+                }}
+              >
                 <div className="row">
                   <span className="chip teal"><Boxes size={10} /> 骨架</span>
                   <span className="spacer" />
                   <span className="small muted">{fmtDate(skeleton.createdAt)}</span>
                 </div>
                 <div className="lc-title" style={{ marginTop: 8 }}>{skeleton.title}</div>
-                <div className="lc-sum">{skeleton.overview}</div>
+                <div className="lc-sum">{plainText(skeleton.overview)}</div>
                 <div className="lc-meta">
                   <span className="chip">{skeleton.main.length} 主流程</span>
                   <span className="chip">{skeleton.support.length} 支撑</span>
                   <span className="chip">{skeleton.detailCount || 0} 讲解</span>
                   <span className="spacer" />
-                  <span
-                    className="chip muted"
-                    role="button"
+                  <button
+                    className="chip muted chip-button"
+                    title="删除骨架"
+                    aria-label="删除骨架"
                     onClick={(e) => { e.stopPropagation(); void removeSkeleton(skeleton); }}
-                  ><Trash2 size={10} /></span>
+                  ><Trash2 size={10} /></button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </section>
@@ -183,36 +219,52 @@ export function LibraryView() {
           {filteredSlices.length ? (
             <div className="lib-grid">
               {filteredSlices.map((slice) => (
-                <button className="lib-card reveal" key={slice.id} onClick={() => void openSlice(slice)}>
+                <div
+                  className="lib-card reveal"
+                  key={slice.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => void openSliceCard(slice)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void openSliceCard(slice);
+                    }
+                  }}
+                >
                   <div className="row">
                     <span className="chip teal"><FileCode2 size={10} /> 切片</span>
                     <span className="spacer" />
                     <span className="small muted">{fmtDate(slice.createdAt)}</span>
                   </div>
                   <div className="lc-title" style={{ marginTop: 8 }}>{slice.title}</div>
-                  <div className="lc-sum">{slice.query || slice.summary}</div>
+                  <div className="lc-sum">{plainText(slice.query || slice.summary)}</div>
                   <div className="lc-meta">
                     {slice.strategies.map((s) => <span className="chip" key={s}>{s}</span>)}
                     <span className="chip">{slice.segments.length} 片段</span>
                     {slice.quality && !slice.quality.ok ? <span className="chip rust">片段异常</span> : null}
                     {slice.staleness && !slice.staleness.fresh ? <span className="chip amber">{slice.staleness.summary}</span> : null}
                     <span className="spacer" />
-                    <span
-                      className="chip muted"
-                      role="button"
+                    <button
+                      className="chip muted chip-button"
+                      title="删除切片"
+                      aria-label="删除切片"
                       onClick={(e) => { e.stopPropagation(); void removeSlice(slice); }}
-                    ><Trash2 size={10} /></span>
+                    ><Trash2 size={10} /></button>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
-          ) : (
-            <div className="empty">
-              <strong>没有匹配的切片</strong>
-              换一个搜索词，或者从阅读台提一个问题生成切片。
-            </div>
-          )}
+          ) : null}
         </section>
+      ) : null}
+
+      {nothingVisible ? (
+        <div className="empty">
+          <strong>{kind === "skeleton" ? "没有匹配的骨架" : "没有匹配的切片"}</strong>
+          换一个搜索词，或者切换筛选条件。也可以从阅读台提一个问题生成新的切片。
+        </div>
       ) : null}
 
       <div className="row wrap" style={{ marginTop: 22, gap: 8 }}>
@@ -222,7 +274,7 @@ export function LibraryView() {
         {track ? (
           <button className="btn btn-sm btn-ghost" onClick={() => {
             setStage("plan");
-            if (activeTrackId) navigate(`/track/${activeTrackId}/plan`);
+            if (activeTrackId) navigate(trackPath(activeTrackId, "plan"));
           }}>
             回到计划
           </button>

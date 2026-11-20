@@ -1,12 +1,14 @@
 {
   "name": "quick-takeapart-desktop",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Tauri shell around the Quick-TakeApart Python engine",
   "scripts": {
     "runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File ./prepare-runtime.ps1",
     "build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./build-release.ps1",
     "build:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File ./build-release.ps1 -SkipRuntime",
+    "runtime:mac": "bash ./prepare-runtime.mac.sh",
+    "build:mac": "bash ./build-release.mac.sh",
     "dev": "tauri dev"
   },
   "devDependencies": {

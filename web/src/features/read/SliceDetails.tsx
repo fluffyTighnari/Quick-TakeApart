@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, BookOpen, GitBranch, RefreshCw, Workflow } from "lucide-react";
 import { useApp } from "../../core/store";
+import { trackPath } from "../../core/routes";
 import type { Slice } from "../../types";
 import { RichText } from "../../ui/RichText";
 
@@ -23,13 +24,13 @@ export function SliceDetails({ slice }: { slice: Slice | null }) {
   function openSymbol(sid: string) {
     void selectSymbol(sid);
     setStage("read");
-    if (track) navigate(`/track/${track.track.id}/read`);
+    if (track) navigate(trackPath(track.track.id, "read", slice?.id));
   }
 
-  function openLocation(file: string) {
-    void selectFile(file);
+  function openLocation(file: string, line?: number | null) {
+    void selectFile(file, line ?? null);
     setStage("read");
-    if (track) navigate(`/track/${track.track.id}/read`);
+    if (track) navigate(trackPath(track.track.id, "read", slice?.id));
   }
 
   const ref = (slice.source?.ref || {}) as { skeletonId?: string; nodeId?: string };
@@ -43,7 +44,7 @@ export function SliceDetails({ slice }: { slice: Slice | null }) {
     selectSkeleton(skeleton.id);
     selectSkeletonNode(skeletonNode.id);
     setStage("architecture");
-    if (track) navigate(`/track/${track.track.id}/architecture`);
+    if (track) navigate(trackPath(track.track.id, "architecture"));
   }
 
   const first = slice.segments[0] || null;
@@ -110,7 +111,7 @@ export function SliceDetails({ slice }: { slice: Slice | null }) {
       ) : null}
 
       <div className="panel-flat panel-body" style={{ marginBottom: 12 }}>
-        <div className="rail-label" style={{ paddingLeft: 0 }}>这条切片怎么读</div>
+        <div className="panel-label">这条切片怎么读</div>
         {!skeletonNode ? (
           <p className="small muted" style={{ marginTop: 5 }}>
             这是自由问题生成的切片。全局背景请看阶段一骨架；这里只保留阅读路线和代码位置。
@@ -139,7 +140,7 @@ export function SliceDetails({ slice }: { slice: Slice | null }) {
         <div className="row wrap" style={{ gap: 5 }}>
           <button className="btn btn-sm" onClick={() => {
             setStage("read");
-            if (track) navigate(`/track/${track.track.id}/read/${slice.id}`);
+            if (track) navigate(trackPath(track.track.id, "read", slice.id));
           }}>
             <BookOpen size={12} /> 在阅读台打开
           </button>

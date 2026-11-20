@@ -3,6 +3,7 @@ import {
   ArrowRight, FolderOpen, FolderSearch, Home, HardDrive, MousePointer2, Upload,
 } from "lucide-react";
 import { api } from "../core/api";
+import { isImeEvent } from "../core/keyboard";
 import { useApp } from "../core/store";
 import { extractDropPath } from "../core/localPath";
 import { FolderBrowser } from "./FolderBrowser";
@@ -102,7 +103,7 @@ export function ProjectPicker({ error }: { error: string | null }) {
               placeholder="D:\\Workspace\\Code\\phy\\Quick-TakeApart"
               onChange={(e) => setRoot(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") void submit();
+                if (e.key === "Enter" && !isImeEvent(e)) void submit();
               }}
             />
           </div>

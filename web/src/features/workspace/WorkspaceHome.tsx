@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, BookOpen, Boxes, FileCode2, Library, Network, Plus, Route } from "lucide-react";
 import { useApp } from "../../core/store";
+import { trackPath } from "../../core/routes";
 
 function fmtDate(iso: string) {
   if (!iso) return "";
@@ -15,7 +16,8 @@ export function WorkspaceHome() {
   const base = useApp((s) => s.base);
   const track = useApp((s) => s.track);
   const activeTrackId = useApp((s) => s.activeTrackId);
-  const selectSlice = useApp((s) => s.selectSlice);
+  const activeSliceId = useApp((s) => s.activeSliceId);
+  const openSlice = useApp((s) => s.openSlice);
   const setStage = useApp((s) => s.setStage);
   const createTrack = useApp((s) => s.createTrack);
 
@@ -23,17 +25,25 @@ export function WorkspaceHome() {
   const current = track?.track;
 
   function go(stage: string) {
-    if (!activeTrackId) return;
-    setStage(stage as "architecture" | "plan" | "read" | "library");
-    navigate(`/track/${activeTrackId}/${stage}`);
+    if (!activeTrackId) {
+      void newTrack();
+      return;
+    }
+    const next = stage as "architecture" | "plan" | "read" | "library";
+    setStage(next);
+    navigate(trackPath(activeTrackId, next, next === "read" ? activeSliceId : null));
   }
 
   async function newTrack() {
     const name = window.prompt("新轨道名", "搞懂主链路");
     if (!name) return;
     const intent = window.prompt("这条轨道的用途 / 粒度", "先看结构，再追一条主链路") || "";
-    const data = await createTrack(name, intent, "结构");
-    navigate(`/track/${data.track.id}/architecture`);
+    try {
+      const data = await createTrack(name, intent, "结构");
+      navigate(trackPath(data.track.id, "architecture"));
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   const recent = [
@@ -47,8 +57,9 @@ export function WorkspaceHome() {
     ...workspace.slices.map((s) => ({
       id: s.id, kind: "切片", title: s.title, date: s.createdAt,
       open: () => {
-        void selectSlice(s.id);
-        if (activeTrackId) navigate(`/track/${activeTrackId}/read/${s.id}`);
+        void openSlice(s).then((trackId) => {
+          if (trackId) navigate(trackPath(trackId, "read", s.id));
+        });
       },
     })),
   ].sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 8);

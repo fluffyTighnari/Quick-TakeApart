@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { Pencil, Trash2 } from "lucide-react";
 import { useApp } from "../../core/store";
+import { stageFromPath } from "../../core/routes";
 import { PlanChat } from "../plan/PlanChat";
 import { SkeletonNodePanel } from "../skeleton/SkeletonNodePanel";
 import { SliceDetails } from "../read/SliceDetails";
@@ -20,13 +21,7 @@ export function ContextDock() {
   const setTraceOpen = useApp((s) => s.setTraceOpen);
   const updateActiveTrack = useApp((s) => s.updateActiveTrack);
   const deleteActiveTrack = useApp((s) => s.deleteActiveTrack);
-  const stage = location.pathname.includes("/plan")
-    ? "plan"
-    : location.pathname.includes("/read")
-      ? "read"
-      : location.pathname.includes("/library")
-        ? "library"
-        : "architecture";
+  const stage = stageFromPath(location.pathname);
 
   if (stage === "plan") {
     return (
@@ -76,7 +71,7 @@ export function ContextDock() {
                   className="btn btn-xs btn-danger"
                   onClick={() => {
                     if (!confirm(`删除轨道「${track?.track.name}」？切片不会被删除。`)) return;
-                    void deleteActiveTrack().then(() => navigate("/"));
+                    void deleteActiveTrack().then(() => navigate("/")).catch(() => undefined);
                   }}
                 >
                   <Trash2 size={10} /> 删除轨道
@@ -120,7 +115,15 @@ export function ContextDock() {
           <button className={`dock-tab${tab === "details" && !traceOpen ? " active" : ""}`} onClick={() => { setTraceOpen(false); setTab("details"); }}>讲解</button>
           <button className={`dock-tab${tab === "thread" && !traceOpen ? " active" : ""}`} onClick={() => { setTraceOpen(false); setTab("thread"); }}>问答</button>
           <button className={`dock-tab${tab === "diagrams" && !traceOpen ? " active" : ""}`} onClick={() => { setTraceOpen(false); setTab("diagrams"); }}>图表</button>
-          {traceOpen ? <button className="dock-tab active" onClick={() => setTraceOpen(true)}>追踪</button> : null}
+          {traceOpen ? (
+            <button
+              className="dock-tab active"
+              title="收起追踪结果"
+              onClick={() => setTraceOpen(false)}
+            >
+              追踪
+            </button>
+          ) : null}
           <span className="spacer" />
           <span className="chip cyan">按切片记忆</span>
         </div>
@@ -141,16 +144,39 @@ export function ContextDock() {
     return (
       <aside className="dock">
         <div className="dock-head">
-          <button className="dock-tab active">库信息</button>
-        </div>
-        <div className="dock-body">
-          {slice ? <SliceDetails slice={slice} /> : (
-            <div className="empty">
-              <strong>全局切片库</strong>
-              所有轨道生成的切片都在这里。选一张卡片查看讲解与问答。
-            </div>
+          {slice ? (
+            <>
+              <button
+                className={`dock-tab${tab !== "thread" ? " active" : ""}`}
+                onClick={() => setTab("details")}
+              >
+                讲解
+              </button>
+              <button
+                className={`dock-tab${tab === "thread" ? " active" : ""}`}
+                onClick={() => setTab("thread")}
+              >
+                问答
+              </button>
+            </>
+          ) : (
+            <button className="dock-tab active">库信息</button>
           )}
+          <span className="spacer" />
+          {slice ? <span className="chip cyan">按切片记忆</span> : null}
         </div>
+        {slice && tab === "thread" ? (
+          <ThreadPanel />
+        ) : (
+          <div className="dock-body">
+            {slice ? <SliceDetails slice={slice} /> : (
+              <div className="empty">
+                <strong>全局切片库</strong>
+                所有轨道生成的切片都在这里。选一张卡片查看讲解与问答。
+              </div>
+            )}
+          </div>
+        )}
       </aside>
     );
   }

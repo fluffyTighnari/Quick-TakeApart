@@ -4,6 +4,8 @@ import {
   BookOpen, Boxes, FileCode2, Library, Network, Route, Search, Sparkles,
 } from "lucide-react";
 import { useApp } from "../core/store";
+import { isImeEvent } from "../core/keyboard";
+import { trackPath } from "../core/routes";
 import type { Stage } from "../types";
 
 interface Item {
@@ -20,9 +22,11 @@ export function CommandPalette() {
   const track = useApp((s) => s.track);
   const base = useApp((s) => s.base);
   const activeTrackId = useApp((s) => s.activeTrackId);
+  const activeSliceId = useApp((s) => s.activeSliceId);
   const setStage = useApp((s) => s.setStage);
   const generateSkeleton = useApp((s) => s.generateSkeleton);
   const generateSlice = useApp((s) => s.generateSlice);
+  const openSlice = useApp((s) => s.openSlice);
   const openCode = useApp((s) => s.openCode);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -52,7 +56,7 @@ export function CommandPalette() {
   const go = (stage: Stage) => {
     if (!activeTrackId) return;
     setStage(stage);
-    navigate(`/track/${activeTrackId}/${stage}`);
+    navigate(trackPath(activeTrackId, stage, stage === "read" ? activeSliceId : null));
   };
 
   const items = useMemo<Item[]>(() => {
@@ -64,8 +68,9 @@ export function CommandPalette() {
       {
         id: "gen-arch", label: "生成一份逻辑骨架", kind: "动作", icon: Sparkles,
         run: () => {
-          const focus = window.prompt("可选：关注点（留空则看整体）", "") || "";
-          void generateSkeleton(focus).then(() => go("architecture")).catch(() => undefined);
+          const answer = window.prompt("可选：关注点（留空则看整体）", "");
+          if (answer === null) return;
+          void generateSkeleton(answer.trim()).then(() => go("architecture")).catch(() => undefined);
         },
       },
       {
@@ -74,8 +79,13 @@ export function CommandPalette() {
           const q = window.prompt("想追踪什么？例如：WebSocket Server 的代码", "");
           if (!q) return;
           void generateSlice(q).then((slice) => {
-            if (slice && activeTrackId) navigate(`/track/${activeTrackId}/read/${slice.id}`);
-          });
+            if (!slice) return;
+            const trackId = slice.trackId || activeTrackId;
+            if (trackId) {
+              setStage("read");
+              navigate(trackPath(trackId, "read", slice.id));
+            }
+          }).catch(() => undefined);
         },
       },
     ];
@@ -93,8 +103,12 @@ export function CommandPalette() {
       out.push({
         id: `slice-${slice.id}`, label: slice.title, kind: "切片", icon: FileCode2,
         run: () => {
-          void useApp.getState().selectSlice(slice.id);
-          if (activeTrackId) navigate(`/track/${activeTrackId}/read/${slice.id}`);
+          void openSlice(slice).then((trackId) => {
+            if (trackId) {
+              setStage("read");
+              navigate(trackPath(trackId, "read", slice.id));
+            }
+          });
         },
       });
     }
@@ -120,7 +134,8 @@ export function CommandPalette() {
       }
     }
     return out;
-  }, [track, base, activeTrackId, generateSkeleton, generateSlice, navigate, openCode]);
+  }, [track, base, activeTrackId, activeSliceId, generateSkeleton, generateSlice,
+    navigate, openCode, openSlice, setStage]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -136,13 +151,14 @@ export function CommandPalette() {
     <div className="palette-backdrop" onMouseDown={(e) => {
       if (e.target === e.currentTarget) setOpen(false);
     }}>
-      <div className="palette">
+      <div className="palette command-palette">
         <input
           ref={inputRef}
           value={query}
           placeholder="搜索阶段、骨架、切片、文件、函数…"
           onChange={(e) => { setQuery(e.target.value); setActive(0); }}
           onKeyDown={(e) => {
+            if (isImeEvent(e)) return;
             if (e.key === "ArrowDown") {
               e.preventDefault();
               setActive((n) => Math.min(filtered.length - 1, n + 1));

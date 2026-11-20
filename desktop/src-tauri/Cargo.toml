@@ -1,6 +1,6 @@
 [package]
 name = "quick-takeapart"
-version = "2.1.0"
+version = "2.1.1"
 description = "Quick-TakeApart desktop shell"
 authors = ["Quick-TakeApart"]
 edition = "2021"

@@ -320,13 +320,14 @@ def request_skeleton(idx: Index, focus: str, *, inventory: str) -> Skeleton:
         user_text=(f"FOCUS: {focus or '整体逻辑'}\n"
                    "Build the logical skeleton. Main flow and parallel support."),
         tool=SKELETON_TOOL,
-        max_tokens=6000,
-        timeout=180,
+        max_tokens=12000,
+        timeout=240,
     )
     return validate_skeleton(raw, idx, focus, "")
 
 
-def heuristic_skeleton(idx: Index, focus: str = "") -> Skeleton:
+def heuristic_skeleton(idx: Index, focus: str = "",
+                      reason: str = "") -> Skeleton:
     arch = heuristic_architecture(idx)
     nodes = []
     for i, node in enumerate(arch.nodes[:MAX_MAIN]):
@@ -345,7 +346,9 @@ def heuristic_skeleton(idx: Index, focus: str = "") -> Skeleton:
         support = [nodes.pop()]
     raw = {
         "title": "逻辑骨架（本地推测）",
-        "overview": "模型不可用，按文件名与命名推测主流程。配置 key 后可获得真正的骨架与节点讲解。",
+        "overview": (
+            "模型不可用，按文件名与命名推测主流程。配置 key 后可获得真正的骨架与节点讲解。"
+            + (f"\n\n错误：{reason}" if reason else "")),
         "main": nodes,
         "support": support,
     }
@@ -385,8 +388,8 @@ def generate_skeleton(root: pathlib.Path, idx: Index, *, track_id: str,
                 idx, symbol_budget=900, compact=True))
         skeleton.track_id = track_id
         source = "model"
-    except (LlmError, SkeletonError):
-        skeleton = heuristic_skeleton(idx, focus)
+    except (LlmError, SkeletonError) as exc:
+        skeleton = heuristic_skeleton(idx, focus, reason=str(exc)[:400])
         skeleton.track_id = track_id
         source = "heuristic"
     save_skeleton(root, skeleton)

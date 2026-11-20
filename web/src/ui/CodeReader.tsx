@@ -86,6 +86,7 @@ function commentStart(line: string, language: string): number {
     if (ch === "'" || ch === '"' || ch === "`") { quote = ch; continue; }
     if (language === "python" && ch === "#") return i;
     if (language !== "python" && ch === "/" && line[i + 1] === "/") return i;
+    if (language !== "python" && ch === "/" && line[i + 1] === "*") return i;
   }
   return -1;
 }
@@ -97,7 +98,6 @@ const PY_TYPES = new Set([
 ]);
 
 const TOKEN_RE = new RegExp([
-  "(#[^\\n]*)",
   '("""[\\s\\S]*?"""|\'\'\'[\\s\\S]*?\'\'\')',
   '([rbfuRBFU]{0,2}"(?:[^"\\\\\\n]|\\\\.)*")',
   "([rbfuRBFU]{0,2}'(?:[^'\\\\\\n]|\\\\.)*')",
@@ -127,10 +127,10 @@ function tokenize(line: string, language: string): Tok[] {
     if (m.index > last) {
       out.push({ text: code.slice(last, m.index), cls: "tok-ghost", start: last, word: false });
     }
-    const [tok, com, tri, dstr, sstr, bstr, deco, num, ident, punct] = m;
+    const [tok, tri, dstr, sstr, bstr, deco, num, ident, punct] = m;
     let cls = "tok-ghost";
     let word = false;
-    if (com || tri || dstr || sstr || bstr) {
+    if (tri || dstr || sstr || bstr) {
       cls = "tok-str";
       prevReal = "str";
     } else if (deco) {
@@ -260,14 +260,29 @@ export function CodeReader({
   }, [symbols, file]);
 
   useEffect(() => {
-    if (!rootRef.current) return;
-    const target = focus?.start || callSite;
+    const root = rootRef.current;
+    if (!root) return;
+    const target = callSite || focus?.start;
     if (!target) return;
-    const el = rootRef.current.querySelector(`[data-line="${target}"]`);
-    if (el) {
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
+    const el = root.querySelector<HTMLElement>(`[data-line="${target}"]`);
+    if (!el) return;
+    // Only scroll the code viewport when it actually scrolls. Using
+    // scrollIntoView unconditionally also scrolled the whole page, hiding the
+    // slice title every time a segment opened.
+    if (root.scrollHeight > root.clientHeight + 1) {
+      const line = el.getBoundingClientRect();
+      const box = root.getBoundingClientRect();
+      const top = root.scrollTop + (line.top - box.top)
+        - root.clientHeight / 2 + line.height / 2;
+      root.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    } else {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }, [file, focus?.start, callSite]);
+
+  useEffect(() => {
+    setSel(null);
+  }, [file]);
 
   useEffect(() => {
     const hide = (event: MouseEvent) => {
@@ -328,7 +343,7 @@ export function CodeReader({
         <span className="sep">/</span>
         <span>{lines.length} 行</span>
         <span className="grow" />
-        <span className="muted">Ctrl+点击函数/变量 · 选中提问</span>
+        <span className="muted code-hint">Ctrl+点击函数/变量 · 选中提问</span>
       </div>
       <div
         className={`code-scroll${showAll ? " tall" : ""}`}

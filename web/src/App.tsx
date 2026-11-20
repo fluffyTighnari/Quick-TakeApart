@@ -21,7 +21,7 @@ function TrackGate({ stage, children }: { stage: string; children: ReactNode }) 
 
   useEffect(() => {
     if (trackId && trackId !== activeTrackId) {
-      void selectTrack(trackId);
+      void selectTrack(trackId).catch(() => undefined);
     }
   }, [trackId, activeTrackId, selectTrack]);
 
@@ -78,21 +78,26 @@ function ShellRoutes() {
 }
 
 function BackendMismatch({ detail }: { detail: string }) {
+  const offline = detail.startsWith("无法连接");
   return (
     <div className="picker-wrap">
       <div className="picker reveal">
-        <div className="eyebrow">Backend mismatch</div>
-        <h1>后端进程是旧版本</h1>
+        <div className="eyebrow">Backend connection</div>
+        <h1>{offline ? "无法连接本地引擎" : "后端进程是旧版本"}</h1>
         <p className="sub">
           {detail}
-          这个页面是新版前端，但当前端口上的 Python 进程还在提供旧 API，所以会出现
-          501、404、选择文件夹无反应。
+          {offline
+            ? "页面没有拿到 /api/health 响应。请确认本地引擎已经启动，或者换一个端口重新打开。"
+            : "这个页面是新版前端，但当前端口上的 Python 进程还在提供旧 API，所以会出现 501、404、选择文件夹无反应。"}
         </p>
         <div className="notice bad" style={{ marginTop: 16 }}>
-          请先结束占用当前端口的旧 python 进程，再启动当前代码：
+          {offline ? "先启动当前代码的本地引擎：" : "请先结束占用当前端口的旧 python 进程，再启动当前代码："}
         </div>
         <pre className="mono" style={{ marginTop: 12, padding: 14, background: "var(--code-bg)", color: "var(--code-ink)", borderRadius: 10, overflow: "auto" }}>
-{`# 结束旧进程（任务管理器 -> 详细信息 -> python.exe -> 结束任务）
+{offline
+  ? `# 在项目根目录启动
+python serve.py <项目目录> --port 7741`
+  : `# 结束旧进程（任务管理器 -> 详细信息 -> python.exe -> 结束任务）
 # 或在管理员终端执行：
 taskkill /PID <旧进程PID> /F
 

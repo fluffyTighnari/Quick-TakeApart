@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { api } from "../core/api";
 import { useApp } from "../core/store";
+import { useEscape } from "../ui/useEscape";
 import type {
   ApiSettings, LangPack, LlmConfigView, LlmProfile, LlmProvider,
 } from "../types";
@@ -77,6 +78,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [languageServers, setLanguageServers] = useState<Record<string, string>>({});
   const [packs, setPacks] = useState<LangPack[]>([]);
   const [selectedPacks, setSelectedPacks] = useState<string[]>([]);
+
+  useEscape(onClose);
 
   const provider = useMemo(
     () => providers.find((item) => item.provider_id === draft?.provider_id) || null,

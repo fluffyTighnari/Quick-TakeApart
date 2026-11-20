@@ -1,5 +1,9 @@
 import { create } from "zustand";
 import { api, ApiError } from "./api";
+import {
+  applyCodeTheme, applyReadingScale, initialCodeTheme, initialReadingScale,
+  type CodeTheme, type ReadingScale,
+} from "./prefs";
 import type {
   BasePayload, SelectionContext, Skeleton, SkeletonNode, Slice, Stage, Thread,
   TraceResult, TrackData, TrackSummary, Workspace,
@@ -22,6 +26,7 @@ interface AppState {
   activeThread: Thread | null;
   suggestedSlices: { query: string; title: string; reason: string }[];
   activeFile: string | null;
+  activeLine: number | null;
   activeSymbol: string | null;
   readMode: "flow" | "files" | "functions";
   selection: SelectionContext | null;
@@ -35,6 +40,8 @@ interface AppState {
   dockOpen: boolean;
   focusMode: boolean;
   contextTab: "details" | "thread" | "diagrams";
+  readingScale: ReadingScale;
+  codeTheme: CodeTheme;
   busy: string | null;
   error: string | null;
   notice: string | null;
@@ -54,9 +61,10 @@ interface AppState {
   importSkeletonMain: (skeletonId: string) => Promise<void>;
   importSkeletonNode: (skeletonId: string, nodeId: string) => Promise<void>;
   selectSlice: (id: string | null) => Promise<Slice | null>;
+  openSlice: (slice: Slice) => Promise<string | null>;
   selectSegment: (id: string | null) => void;
-  selectSliceFile: (file: string) => Promise<void>;
-  selectFile: (file: string | null) => Promise<void>;
+  selectSliceFile: (file: string, line?: number | null) => Promise<void>;
+  selectFile: (file: string | null, line?: number | null) => Promise<void>;
   selectSymbol: (id: string | null) => Promise<void>;
   openCode: (file: string, symbolId?: string | null) => Promise<void>;
   setReadMode: (mode: "flow" | "files" | "functions") => void;
@@ -69,7 +77,7 @@ interface AppState {
   regenerateSlice: (id: string) => Promise<void>;
   planChat: (message: string) => Promise<void>;
   applyPlan: (items: unknown[], name?: string, intent?: string) => Promise<void>;
-  generateBind: (request: Record<string, unknown>) => Promise<void>;
+  generateBind: (request: Record<string, unknown>) => Promise<Slice>;
   sendThreadMessage: (message: string, context?: SelectionContext) => Promise<void>;
   trace: (file: string, line: number, char: number, kind: string) => Promise<void>;
   setTraceOpen: (open: boolean) => void;
@@ -78,6 +86,11 @@ interface AppState {
   toggleDock: () => void;
   toggleFocusMode: () => void;
   setContextTab: (tab: "details" | "thread" | "diagrams") => void;
+  revealDock: (tab: "details" | "thread" | "diagrams") => void;
+  setReadingScale: (scale: ReadingScale) => void;
+  cycleReadingScale: () => void;
+  setCodeTheme: (theme: CodeTheme) => void;
+  toggleCodeTheme: () => void;
   setError: (error: string | null) => void;
   setNotice: (notice: string | null) => void;
   clearActiveSlice: () => void;
@@ -106,7 +119,11 @@ function mergeWorkspace(workspace: Workspace | null, data: TrackData): Workspace
     t.id === data.track.id ? summaryFromTrack(data) : t,
   );
   if (!tracks.some((t) => t.id === data.track.id)) tracks.unshift(summaryFromTrack(data));
-  return { ...workspace, tracks };
+  // The library and home page read workspace.slices, not track.slices. Keep the
+  // two views in sync whenever a track mutation returns fresh slice records.
+  const slices = new Map(workspace.slices.map((slice) => [slice.id, slice]));
+  for (const slice of data.slices) slices.set(slice.id, slice);
+  return { ...workspace, tracks, slices: [...slices.values()] };
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -126,6 +143,7 @@ export const useApp = create<AppState>((set, get) => ({
   activeThread: null,
   suggestedSlices: [],
   activeFile: null,
+  activeLine: null,
   activeSymbol: null,
   readMode: "files",
   selection: null,
@@ -139,6 +157,8 @@ export const useApp = create<AppState>((set, get) => ({
   dockOpen: true,
   focusMode: false,
   contextTab: "details",
+  readingScale: initialReadingScale(),
+  codeTheme: initialCodeTheme(),
   busy: null,
   error: null,
   notice: null,
@@ -194,6 +214,7 @@ export const useApp = create<AppState>((set, get) => ({
         const data = await api.track(first.id);
         set({
           track: data,
+          workspace: mergeWorkspace(get().workspace, data),
           activeTrackId: data.track.id,
           activeSkeletonId: data.skeletons[0]?.id || null,
           activeSkeletonNodeId: null,
@@ -209,10 +230,39 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   openProject: async (root) => {
-    set({ busy: "正在索引项目…", error: null });
+    set({ busy: "正在索引项目…", error: null, notice: null });
     try {
       await api.open(root);
-      set({ base: await api.base(), booted: false, workspace: null, track: null });
+      // A different project has different track/slice ids. Keeping the old hash
+      // would send the new workspace to a route that no longer exists.
+      window.location.hash = "#/";
+      set({
+        base: await api.base(),
+        booted: false,
+        workspace: null,
+        track: null,
+        activeTrackId: null,
+        activeStage: "architecture",
+        activeSkeletonId: null,
+        activeSkeletonNodeId: null,
+        activeSliceId: null,
+        activeSlice: null,
+        activeSegmentId: null,
+        activeThread: null,
+        suggestedSlices: [],
+        activeFile: null,
+        activeLine: null,
+        activeSymbol: null,
+        selection: null,
+        sourceCache: {},
+        traceResult: null,
+        traceRequest: null,
+        traceOpen: false,
+        traceLoading: false,
+        contextTab: "details",
+        focusMode: false,
+        backendStale: null,
+      });
       await get().boot();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) });
@@ -233,43 +283,64 @@ export const useApp = create<AppState>((set, get) => ({
 
   selectTrack: async (id) => {
     if (!id) return;
-    set({ busy: "正在打开轨道…", error: null });
+    set({
+      busy: "正在打开轨道…",
+      error: null,
+      suggestedSlices: [],
+      selection: null,
+      traceResult: null,
+      traceRequest: null,
+      traceOpen: false,
+      traceLoading: false,
+    });
     try {
       const data = await api.track(id);
+      const firstSlice = data.slices[0];
       set({
         track: data,
+        workspace: mergeWorkspace(get().workspace, data),
         activeTrackId: data.track.id,
         activeSkeletonId: data.skeletons[0]?.id || null,
         activeSkeletonNodeId: null,
-        activeSliceId: data.slices[0]?.id || null,
+        activeSliceId: firstSlice?.id || null,
         activeSlice: null,
         activeSegmentId: null,
-        activeThread: data.threads[0] || null,
-        activeFile: data.slices[0]?.segments?.[0]?.file || null,
+        activeThread: null,
+        activeFile: firstSlice?.segments?.[0]?.file || null,
+        activeLine: null,
         activeSymbol: null,
-        readMode: data.slices[0] ? "flow" : "files",
-        selection: null,
+        readMode: firstSlice ? "flow" : "files",
+        contextTab: "details",
       });
-      if (data.slices[0]) {
-        const loaded = await api.slice(data.slices[0].id);
-        let thread = loaded.thread ||
-          data.threads.find((t) => t.sliceId === loaded.slice.id) || null;
-        if (!thread) {
-          const created = await api.createThread({
-            scope: "slice",
-            trackId: data.track.id,
-            sliceId: loaded.slice.id,
-            title: loaded.slice.title,
-          });
-          thread = created.thread;
-        }
-        set({
-          activeSlice: loaded.slice,
-          activeThread: thread,
-          activeSegmentId: loaded.slice.segments[0]?.id || null,
-          activeFile: loaded.slice.segments[0]?.file || null,
-          readMode: "flow",
+      if (firstSlice) {
+        const loaded = await api.slice(firstSlice.id).catch((err) => {
+          set({ error: err instanceof Error ? err.message : String(err) });
+          return null;
         });
+        if (loaded) {
+          set({
+            activeSlice: loaded.slice,
+            activeSegmentId: loaded.slice.segments[0]?.id || null,
+            activeFile: loaded.slice.segments[0]?.file || null,
+            readMode: "flow",
+          });
+          let thread = loaded.thread ||
+            data.threads.find((t) => t.sliceId === loaded.slice.id) || null;
+          if (!thread) {
+            try {
+              const created = await api.createThread({
+                scope: "slice",
+                trackId: data.track.id,
+                sliceId: loaded.slice.id,
+                title: loaded.slice.title,
+              });
+              thread = created.thread;
+            } catch (err) {
+              set({ error: err instanceof Error ? err.message : String(err) });
+            }
+          }
+          set({ activeThread: thread });
+        }
       }
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) });
@@ -289,6 +360,22 @@ export const useApp = create<AppState>((set, get) => ({
         track: res.trackRecord,
         activeTrackId: res.track.id,
         activeStage: "architecture",
+        activeSkeletonId: null,
+        activeSkeletonNodeId: null,
+        activeSliceId: null,
+        activeSlice: null,
+        activeSegmentId: null,
+        activeThread: null,
+        suggestedSlices: [],
+        activeFile: null,
+        activeLine: null,
+        activeSymbol: null,
+        selection: null,
+        traceResult: null,
+        traceRequest: null,
+        traceOpen: false,
+        traceLoading: false,
+        contextTab: "details",
       });
       return res.trackRecord;
     } catch (err) {
@@ -323,28 +410,29 @@ export const useApp = create<AppState>((set, get) => ({
       await api.deleteTrack(track.track.id);
       const workspace = await api.workspace();
       const next = workspace.tracks.find((t) => t.id !== track.track.id);
+      set({ workspace, track: null, activeTrackId: null });
       if (next) {
-        const data = await api.track(next.id);
-        set({
-          workspace,
-          track: data,
-          activeTrackId: data.track.id,
-          activeSliceId: data.slices[0]?.id || null,
-          activeSlice: null,
-          activeThread: null,
-          activeFile: data.slices[0]?.segments?.[0]?.file || null,
-          readMode: data.slices[0] ? "flow" : "files",
-        });
+        await get().selectTrack(next.id);
       } else {
         set({
           workspace: { ...workspace, tracks: [] },
-          track: null,
-          activeTrackId: null,
+          activeSkeletonId: null,
+          activeSkeletonNodeId: null,
           activeSliceId: null,
           activeSlice: null,
+          activeSegmentId: null,
           activeThread: null,
+          suggestedSlices: [],
           activeFile: null,
+          activeLine: null,
+          activeSymbol: null,
+          selection: null,
+          traceResult: null,
+          traceRequest: null,
+          traceOpen: false,
+          traceLoading: false,
           readMode: "files",
+          contextTab: "details",
         });
       }
     } catch (err) {
@@ -465,42 +553,89 @@ export const useApp = create<AppState>((set, get) => ({
 
   selectSlice: async (id) => {
     if (!id) {
-      set({ activeSliceId: null, activeSlice: null, activeThread: null });
+      set({
+        activeSliceId: null,
+        activeSlice: null,
+        activeSegmentId: null,
+        activeThread: null,
+      });
       return null;
     }
-    set({ busy: "正在打开切片…", error: null });
+    const first = get().activeSlice;
+    set({
+      busy: "正在打开切片…",
+      error: null,
+      suggestedSlices: [],
+      selection: null,
+      traceResult: null,
+      traceRequest: null,
+      traceOpen: false,
+      traceLoading: false,
+      // Do not keep showing the previous slice while the requested one loads.
+      activeSlice: first?.id === id ? first : null,
+    });
     try {
       const res = await api.slice(id);
-      const track = get().track;
-      let thread = res.thread ||
-        track?.threads.find((t) => t.sliceId === id) || null;
-      if (!thread) {
-        const created = await api.createThread({
-          scope: "slice",
-          trackId: track?.track.id,
-          sliceId: id,
-          title: res.slice.title,
-        });
-        thread = created.thread;
-      }
+      const segment = res.slice.segments[0] || null;
       set({
         activeSliceId: res.slice.id,
         activeSlice: res.slice,
-        activeThread: thread,
         suggestedSlices: [],
-        activeSegmentId: res.slice.segments[0]?.id || null,
-        activeFile: res.slice.segments[0]?.file || null,
+        activeThread: null,
+        activeSegmentId: segment?.id || null,
+        activeFile: segment?.file || null,
+        activeLine: null,
         activeSymbol: null,
         readMode: "flow",
         selection: null,
         contextTab: "details",
       });
+      const track = get().track;
+      let thread = res.thread ||
+        track?.threads.find((t) => t.sliceId === id) || null;
+      if (!thread) {
+        try {
+          const created = await api.createThread({
+            scope: "slice",
+            trackId: track?.track.id,
+            sliceId: id,
+            title: res.slice.title,
+          });
+          thread = created.thread;
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      set({ activeThread: thread, busy: null });
       return res.slice;
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
+      set({
+        error: err instanceof Error ? err.message : String(err),
+        busy: null,
+        activeSliceId: null,
+        activeSlice: null,
+        activeSegmentId: null,
+        activeThread: null,
+      });
       return null;
-    } finally {
-      set({ busy: null });
+    }
+  },
+
+  openSlice: async (slice) => {
+    const workspace = get().workspace;
+    const knownTrack = slice.trackId
+      && workspace?.tracks.some((item) => item.id === slice.trackId)
+      ? slice.trackId
+      : null;
+    const target = knownTrack || get().activeTrackId;
+    try {
+      if (target && target !== get().activeTrackId) {
+        await get().selectTrack(target);
+      }
+      const loaded = await get().selectSlice(slice.id);
+      return loaded ? get().activeTrackId : null;
+    } catch {
+      return null;
     }
   },
 
@@ -510,16 +645,28 @@ export const useApp = create<AppState>((set, get) => ({
     set({
       activeSegmentId: id,
       activeFile: segment?.file || get().activeFile,
+      activeLine: segment?.startLine ?? null,
       activeSymbol: segment?.symbolId || null,
       contextTab: "details",
     });
-    if (segment) void get().sourceFor(segment.file);
+    if (segment) {
+      void get().sourceFor(segment.file);
+      // Keep the code in view when the user picks a segment from the rail.
+      // `nearest` leaves the page alone when the card is already visible.
+      requestAnimationFrame(() => {
+        document.querySelector(".seg-card")?.scrollIntoView({
+          block: "nearest",
+          behavior: "smooth",
+        });
+      });
+    }
   },
 
-  selectSliceFile: async (file) => {
+  selectSliceFile: async (file, line = null) => {
     set({
       activeSegmentId: null,
       activeFile: file,
+      activeLine: line,
       activeSymbol: null,
       readMode: "files",
     });
@@ -530,12 +677,23 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  selectFile: async (file) => {
+  selectFile: async (file, line = null) => {
     if (!file) {
-      set({ activeFile: null, activeSymbol: null, activeSegmentId: null });
+      set({
+        activeFile: null,
+        activeLine: null,
+        activeSymbol: null,
+        activeSegmentId: null,
+      });
       return;
     }
-    set({ activeFile: file, activeSymbol: null, activeSegmentId: null, readMode: "files" });
+    set({
+      activeFile: file,
+      activeLine: line,
+      activeSymbol: null,
+      activeSegmentId: null,
+      readMode: "files",
+    });
     try {
       await get().sourceFor(file);
     } catch (err) {
@@ -551,7 +709,16 @@ export const useApp = create<AppState>((set, get) => ({
     const base = get().base;
     const sym = base?.symbols[id];
     if (!sym) return;
-    set({ activeSymbol: id, activeFile: sym.file });
+    set({
+      activeSymbol: id,
+      activeFile: sym.file,
+      activeLine: sym.line,
+      // A symbol jump must leave segment mode, otherwise the old segment card
+      // keeps rendering and the app looks like nothing happened.
+      activeSegmentId: null,
+      readMode: "files",
+      selection: null,
+    });
     try {
       await get().sourceFor(sym.file);
     } catch (err) {
@@ -560,17 +727,23 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   openCode: async (file, symbolId) => {
+    const sym = symbolId ? get().base?.symbols[symbolId] : null;
     set({
       activeSliceId: null,
       activeSlice: null,
       activeThread: null,
       suggestedSlices: [],
       activeFile: file,
+      activeLine: sym?.line ?? null,
       activeSymbol: symbolId || null,
       activeSegmentId: null,
       readMode: "files",
       selection: null,
       contextTab: "details",
+      traceResult: null,
+      traceRequest: null,
+      traceOpen: false,
+      traceLoading: false,
     });
     try {
       await get().sourceFor(file);
@@ -616,6 +789,8 @@ export const useApp = create<AppState>((set, get) => ({
         activeThread: res.thread,
         activeSegmentId: res.slice.segments[0]?.id || null,
         activeFile: res.slice.segments[0]?.file || null,
+        activeLine: null,
+        activeSymbol: null,
         readMode: "flow",
         contextTab: "details",
       });
@@ -645,6 +820,8 @@ export const useApp = create<AppState>((set, get) => ({
         activeThread: res.thread,
         activeSegmentId: res.slice.segments[0]?.id || null,
         activeFile: res.slice.segments[0]?.file || null,
+        activeLine: null,
+        activeSymbol: null,
         readMode: "flow",
         notice: `已重新生成「${res.slice.title}」`,
         contextTab: "details",
@@ -712,10 +889,13 @@ export const useApp = create<AppState>((set, get) => ({
         activeThread: res.thread,
         activeSegmentId: res.slice.segments[0]?.id || null,
         activeFile: res.slice.segments[0]?.file || null,
+        activeLine: null,
+        activeSymbol: null,
         readMode: "flow",
         notice: `已生成并绑定「${res.slice.title}」`,
         contextTab: "details",
       });
+      return res.slice;
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) });
       throw err;
@@ -754,7 +934,14 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   trace: async (file, line, char, kind) => {
-    set({ traceLoading: true, traceOpen: true, traceRequest: { file, line, char } });
+    set({
+      traceLoading: true,
+      traceOpen: true,
+      traceRequest: { file, line, char },
+      traceResult: null,
+      dockOpen: true,
+      focusMode: false,
+    });
     try {
       const res = await api.trace({ file, line, char, kind });
       set({ traceResult: res });
@@ -779,10 +966,32 @@ export const useApp = create<AppState>((set, get) => ({
   toggleDock: () => set((state) => ({ dockOpen: !state.dockOpen, focusMode: false })),
   toggleFocusMode: () => set((state) => ({ focusMode: !state.focusMode })),
   setContextTab: (tab) => set({ contextTab: tab }),
+  revealDock: (tab) => set({ contextTab: tab, dockOpen: true, focusMode: false }),
+  setReadingScale: (scale) => {
+    applyReadingScale(scale);
+    set({ readingScale: scale });
+  },
+  cycleReadingScale: () => {
+    const order: ReadingScale[] = ["compact", "comfortable", "large"];
+    const index = order.indexOf(get().readingScale);
+    const next = order[(index + 1) % order.length];
+    applyReadingScale(next);
+    set({ readingScale: next });
+  },
+  setCodeTheme: (theme) => {
+    applyCodeTheme(theme);
+    set({ codeTheme: theme });
+  },
+  toggleCodeTheme: () => {
+    const next: CodeTheme = get().codeTheme === "dark" ? "light" : "dark";
+    applyCodeTheme(next);
+    set({ codeTheme: next });
+  },
   setError: (error) => set({ error }),
   setNotice: (notice) => set({ notice }),
   clearActiveSlice: () => set({
     activeSliceId: null, activeSlice: null, activeSegmentId: null,
-    activeThread: null,
+    activeThread: null, suggestedSlices: [], activeLine: null,
+    traceResult: null, traceRequest: null, traceOpen: false, traceLoading: false,
   }),
 }));

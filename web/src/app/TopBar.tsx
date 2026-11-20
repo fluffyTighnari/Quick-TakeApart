@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   BookOpen, Command, FolderOpen, Library, Maximize2, Minimize2,
-  Network, PanelLeft, PanelRight, Route, Settings,
+  Moon, Network, PanelLeft, PanelRight, Route, Settings, Sun, Type,
 } from "lucide-react";
 import { useApp } from "../core/store";
+import { READING_SCALE_LABEL } from "../core/prefs";
+import { stageFromPath, trackPath } from "../core/routes";
 import type { Stage } from "../types";
 import { ProjectModal } from "./ProjectModal";
 import { SettingsModal } from "./SettingsModal";
@@ -16,18 +18,12 @@ const STAGES: { id: Stage; label: string; num: string; icon: typeof Network }[] 
   { id: "library", label: "切片库", num: "04", icon: Library },
 ];
 
-function stageFromPath(path: string): Stage {
-  if (path.includes("/plan")) return "plan";
-  if (path.includes("/read")) return "read";
-  if (path.includes("/library")) return "library";
-  return "architecture";
-}
-
 export function TopBar() {
   const navigate = useNavigate();
   const location = useLocation();
   const workspace = useApp((s) => s.workspace);
   const activeTrackId = useApp((s) => s.activeTrackId);
+  const activeSliceId = useApp((s) => s.activeSliceId);
   const setStage = useApp((s) => s.setStage);
   const setCommandOpen = useApp((s) => s.setCommandOpen);
   const railOpen = useApp((s) => s.railOpen);
@@ -36,6 +32,10 @@ export function TopBar() {
   const toggleRail = useApp((s) => s.toggleRail);
   const toggleDock = useApp((s) => s.toggleDock);
   const toggleFocusMode = useApp((s) => s.toggleFocusMode);
+  const readingScale = useApp((s) => s.readingScale);
+  const cycleReadingScale = useApp((s) => s.cycleReadingScale);
+  const codeTheme = useApp((s) => s.codeTheme);
+  const toggleCodeTheme = useApp((s) => s.toggleCodeTheme);
   const [projectOpen, setProjectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const stage = stageFromPath(location.pathname);
@@ -43,7 +43,7 @@ export function TopBar() {
   function go(next: Stage) {
     if (!activeTrackId) return;
     setStage(next);
-    navigate(`/track/${activeTrackId}/${next}`);
+    navigate(trackPath(activeTrackId, next, next === "read" ? activeSliceId : null));
   }
 
   return (
@@ -74,6 +74,8 @@ export function TopBar() {
               className={`stage-tab${stage === id ? " active" : ""}`}
               onClick={() => go(id)}
               disabled={!activeTrackId}
+              title={label}
+              aria-label={label}
             >
               <span className="num">{num}</span>
               <Icon size={13} />
@@ -91,25 +93,41 @@ export function TopBar() {
         </div>
 
         <button
-          className={`icon-btn${railOpen && !focusMode ? " is-on" : ""}`}
+          className={`icon-btn top-toggle-rail${railOpen && !focusMode ? " is-on" : ""}`}
           title={railOpen ? "隐藏左栏" : "显示左栏"}
           onClick={toggleRail}
         >
           <PanelLeft size={15} />
         </button>
         <button
-          className={`icon-btn${dockOpen && !focusMode ? " is-on" : ""}`}
+          className={`icon-btn top-toggle-dock${dockOpen && !focusMode ? " is-on" : ""}`}
           title={dockOpen ? "隐藏右栏" : "显示右栏"}
           onClick={toggleDock}
         >
           <PanelRight size={15} />
         </button>
         <button
-          className={`icon-btn${focusMode ? " is-on" : ""}`}
+          className={`icon-btn top-toggle-focus${focusMode ? " is-on" : ""}`}
           title={focusMode ? "退出全屏阅读" : "全屏阅读"}
           onClick={toggleFocusMode}
         >
           {focusMode ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+        </button>
+        <button
+          className="icon-btn"
+          title={`阅读字号：${READING_SCALE_LABEL[readingScale]}（点击切换）`}
+          aria-label="切换阅读字号"
+          onClick={cycleReadingScale}
+        >
+          <Type size={15} />
+        </button>
+        <button
+          className="icon-btn"
+          title={codeTheme === "dark" ? "切换为浅色代码底" : "切换为深色代码底"}
+          aria-label="切换代码配色"
+          onClick={toggleCodeTheme}
+        >
+          {codeTheme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
         </button>
         <button className="icon-btn" title="API 设置" onClick={() => setSettingsOpen(true)}>
           <Settings size={15} />

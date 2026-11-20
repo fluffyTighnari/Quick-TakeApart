@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowUpRight, MessageSquare, Send, Sparkles, X } from "lucide-react";
 import { useApp } from "../../core/store";
+import { isImeEvent } from "../../core/keyboard";
+import { trackPath } from "../../core/routes";
 import { RichText } from "../../ui/RichText";
 
 function shortName(sid: string) {
@@ -28,17 +30,29 @@ export function ThreadPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const messages = thread?.messages || [];
+  const answering = busy?.startsWith("正在回答") || false;
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, busy]);
+  }, [messages.length, answering]);
 
   if (!slice) {
     return <div className="dock-body"><div className="empty"><strong>没有打开切片</strong>侧页问答按切片隔离；先打开一条切片。</div></div>;
   }
   if (!thread) {
-    return <div className="dock-body"><div className="loading">正在准备这条切片的问答线程…</div></div>;
+    return (
+      <div className="dock-body">
+        {busy?.startsWith("正在打开切片") ? (
+          <div className="loading">正在准备这条切片的问答线程…</div>
+        ) : (
+          <div className="empty">
+            <strong>还没有问答线程</strong>
+            重新打开这张切片会创建线程；已有讲解和代码阅读不受影响。
+          </div>
+        )}
+      </div>
+    );
   }
 
   async function send() {
@@ -56,11 +70,13 @@ export function ThreadPanel() {
     void selectSymbol(sid);
     setReadMode("files");
     setStage("read");
+    if (track) navigate(trackPath(track.track.id, "read", slice?.id));
   }
-  function openLocation(file: string) {
-    void selectFile(file);
+  function openLocation(file: string, line?: number | null) {
+    void selectFile(file, line ?? null);
     setReadMode("files");
     setStage("read");
+    if (track) navigate(trackPath(track.track.id, "read", slice?.id));
   }
 
   return (
@@ -113,7 +129,7 @@ export function ThreadPanel() {
                       key={i}
                       onClick={() => {
                         if (citation.kind === "symbol" && citation.symbolId) openSymbol(citation.symbolId);
-                        else if (citation.file) openLocation(citation.file);
+                        else if (citation.file) openLocation(citation.file, citation.startLine);
                       }}
                     >
                       {citation.kind === "symbol" ? shortName(citation.symbolId || "") : citation.label || citation.file}
@@ -126,7 +142,7 @@ export function ThreadPanel() {
           );
         })}
 
-        {busy ? <div className="loading" style={{ padding: "4px 2px" }}>正在读你选中的代码…</div> : null}
+        {answering ? <div className="loading" style={{ padding: "4px 2px" }}>正在读你选中的代码…</div> : null}
 
         {suggested.length ? (
           <div className="chat-needs">
@@ -139,8 +155,11 @@ export function ThreadPanel() {
                   className="btn btn-xs btn-primary"
                   disabled={!!busy}
                   onClick={() => void generateSlice(item.query).then((created) => {
-                    if (created && track) navigate(`/track/${track.track.id}/read/${created.id}`);
-                  })}
+                    if (created && track) {
+                      setStage("read");
+                      navigate(trackPath(track.track.id, "read", created.id));
+                    }
+                  }).catch(() => undefined)}
                 >
                   <Sparkles size={10} /> 生成切片
                 </button>
@@ -164,7 +183,7 @@ export function ThreadPanel() {
             placeholder="问这条切片：这个函数为什么这样写？/ 这里失败会怎样？"
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !isImeEvent(e)) {
                 e.preventDefault();
                 void send();
               }

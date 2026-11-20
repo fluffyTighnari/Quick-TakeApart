@@ -4,6 +4,9 @@ import {
   ChevronDown, FileCode2, Layers, Plus, Route, Search, X,
 } from "lucide-react";
 import { useApp } from "../core/store";
+import { isImeEvent } from "../core/keyboard";
+import { stageFromPath, trackPath } from "../core/routes";
+import { useEscape } from "../ui/useEscape";
 import type { Stage } from "../types";
 import { FileTree } from "../features/read/FileTree";
 import { SliceDirectory } from "../features/read/SliceDirectory";
@@ -17,11 +20,13 @@ function NewTrackModal({ onClose }: { onClose: () => void }) {
   const [depth, setDepth] = useState("结构");
   const [error, setError] = useState("");
 
+  useEscape(onClose);
+
   async function submit() {
     if (!name.trim()) return;
     try {
       const data = await createTrack(name.trim(), intent.trim(), depth);
-      navigate(`/track/${data.track.id}/architecture`);
+      navigate(trackPath(data.track.id, "architecture"));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -32,7 +37,7 @@ function NewTrackModal({ onClose }: { onClose: () => void }) {
     <div className="palette-backdrop" onMouseDown={(e) => {
       if (e.target === e.currentTarget) onClose();
     }}>
-      <div className="palette" style={{ padding: 18 }}>
+      <div className="palette dialog" style={{ padding: 18 }}>
         <div className="row" style={{ marginBottom: 12 }}>
           <div className="grow">
             <div className="eyebrow" style={{ marginBottom: 2 }}>新学习轨道</div>
@@ -43,8 +48,16 @@ function NewTrackModal({ onClose }: { onClose: () => void }) {
         <div className="col">
           <div className="field">
             <label>轨道名</label>
-            <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="例如：搞懂请求主链路" />
+            <input
+              className="input"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !isImeEvent(e)) void submit();
+              }}
+              placeholder="例如：搞懂请求主链路"
+            />
           </div>
           <div className="field">
             <label>用途 / 目标</label>
@@ -85,18 +98,12 @@ export function SideRail() {
   const activeSlice = useApp((s) => s.activeSlice);
   const activeSliceId = useApp((s) => s.activeSliceId);
   const selectTrack = useApp((s) => s.selectTrack);
-  const selectSlice = useApp((s) => s.selectSlice);
+  const openSlice = useApp((s) => s.openSlice);
   const setStage = useApp((s) => s.setStage);
   const [newTrack, setNewTrack] = useState(false);
   const [sliceQuery, setSliceQuery] = useState("");
 
-  const stage: Stage = location.pathname.includes("/plan")
-    ? "plan"
-    : location.pathname.includes("/read")
-      ? "read"
-      : location.pathname.includes("/library")
-        ? "library"
-        : "architecture";
+  const stage: Stage = stageFromPath(location.pathname);
 
   const slices = useMemo(() => {
     const map = new Map((workspace?.slices || []).map((s) => [s.id, s]));
@@ -108,18 +115,23 @@ export function SideRail() {
   );
 
   async function switchTrack(id: string) {
-    await selectTrack(id);
-    if (stage === "read") navigate(`/track/${id}/read`);
-    else if (stage === "plan") navigate(`/track/${id}/plan`);
-    else if (stage === "library") navigate(`/track/${id}/library`);
-    else navigate(`/track/${id}/architecture`);
+    try {
+      await selectTrack(id);
+      const sliceId = stage === "read" ? useApp.getState().activeSliceId : null;
+      navigate(trackPath(id, stage, sliceId));
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   async function switchSlice(id: string) {
     if (!id) return;
-    await selectSlice(id);
+    const slice = slices.find((item) => item.id === id);
+    if (!slice) return;
+    const trackId = await openSlice(slice);
+    if (!trackId) return;
     setStage("read");
-    navigate(`/track/${activeTrackId}/read/${id}`);
+    navigate(trackPath(trackId, "read", id));
   }
 
   const showSliceDirectory = stage === "read" && activeSlice;
@@ -191,8 +203,8 @@ export function SideRail() {
               className="rail-context-toggle"
               title="回到项目文件树（不删除切片）"
               onClick={() => {
-                if (activeTrackId) navigate(`/track/${activeTrackId}/read`);
                 useApp.getState().clearActiveSlice();
+                if (activeTrackId) navigate(trackPath(activeTrackId, "read"));
               }}
             >
               项目文件
@@ -212,7 +224,7 @@ export function SideRail() {
         onClick={() => {
           if (!activeTrackId) return;
           setStage("plan");
-          navigate(`/track/${activeTrackId}/plan`);
+          navigate(trackPath(activeTrackId, "plan"));
         }}
       >
         <Route size={12} /> 打开学习计划

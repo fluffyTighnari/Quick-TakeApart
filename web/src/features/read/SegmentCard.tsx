@@ -36,6 +36,8 @@ export function SegmentCard({
 
   useEffect(() => {
     let alive = true;
+    setSource("");
+    setError("");
     sourceFor(segment.file)
       .then((text) => { if (alive) setSource(text); })
       .catch((err) => { if (alive) setError(err instanceof Error ? err.message : String(err)); });
@@ -64,7 +66,8 @@ export function SegmentCard({
         <>
           {segment.note ? <div className="seg-note">{segment.note}</div> : null}
           {error ? <div className="notice bad" style={{ margin: 8 }}>{error}</div> : null}
-          {!source ? <div className="loading" style={{ padding: 12 }}>读取源码…</div> : (
+          {!source && !error ? <div className="loading" style={{ padding: 12 }}>读取源码…</div> : null}
+          {source ? (
             <CodeReader
               file={segment.file}
               text={text}
@@ -78,7 +81,7 @@ export function SegmentCard({
               onAsk={onAsk}
               onSliceSelection={onSliceSelection}
             />
-          )}
+          ) : null}
           <div className="row" style={{ padding: "6px 9px", borderTop: "1px solid var(--line)", gap: 5 }}>
             <button className="btn btn-xs btn-ghost" onClick={() => setExpanded((v) => !v)}>
               {expanded ? <Minimize2 size={11} /> : <Maximize2 size={11} />}

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ArrowUp, Check, ChevronRight, Folder, FolderGit2, HardDrive, Home, X } from "lucide-react";
 import { api } from "../core/api";
+import { isImeEvent } from "../core/keyboard";
+import { useEscape } from "../ui/useEscape";
 
 interface BrowseData {
   path: string;
@@ -30,6 +32,8 @@ export function FolderBrowser({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [manual, setManual] = useState("");
+
+  useEscape(onClose);
 
   async function load(path?: string) {
     setLoading(true);
@@ -69,7 +73,7 @@ export function FolderBrowser({
             spellCheck={false}
             onChange={(e) => setManual(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") void load(manual);
+              if (e.key === "Enter" && !isImeEvent(e)) void load(manual);
             }}
             placeholder="D:\\path\\to\\project 或 ~/project"
           />

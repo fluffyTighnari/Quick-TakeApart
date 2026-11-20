@@ -79,7 +79,10 @@ export function SliceDirectory({ slice }: { slice: Slice }) {
               key={file}
               className={`slice-dir-row${!activeSegmentId && file === activeFile ? " on" : ""}`}
               title={file}
-              onClick={() => void selectSliceFile(file)}
+              onClick={() => void selectSliceFile(
+                file,
+                slice.segments.find((segment) => segment.file === file)?.startLine ?? null,
+              )}
             >
               <FileCode2 size={11} />
               <span className="sdr-main">

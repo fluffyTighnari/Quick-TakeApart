@@ -5,6 +5,7 @@ import {
   Minimize2, Plus, RefreshCw,
 } from "lucide-react";
 import { useApp } from "../../core/store";
+import { trackPath } from "../../core/routes";
 import type { SelectionContext, Slice, View } from "../../types";
 import { SegmentCard } from "./SegmentCard";
 import { CodeReader } from "../../ui/CodeReader";
@@ -22,10 +23,17 @@ function segmentsForView(view: View, slice: Slice, index: number) {
   });
 }
 
-function viewOfSegment(slice: Slice, segmentId: string | null): number {
+function viewOfSegment(slice: Slice, segmentId: string | null, current: number): number {
   if (!segmentId) return 0;
   const segment = slice.segments.find((s) => s.id === segmentId);
   if (!segment) return 0;
+  // Keep the view the user just clicked when that view also contains the
+  // segment. Falling back by symbol alone made some tabs snap back.
+  const currentView = slice.views[current];
+  if (currentView && segmentsForView(currentView, slice, current)
+    .some((item) => item.id === segmentId)) {
+    return current;
+  }
   const byTitle = slice.views.findIndex((v) => v.title && v.title === segment.flowTitle);
   if (byTitle >= 0) return byTitle;
   const bySymbol = slice.views.findIndex((v) =>
@@ -36,6 +44,7 @@ function viewOfSegment(slice: Slice, segmentId: string | null): number {
 function FullFileView({
   file,
   slice,
+  focusLine,
   onAsk,
   onSliceSelection,
   onTrace,
@@ -43,6 +52,7 @@ function FullFileView({
 }: {
   file: string;
   slice: Slice | null;
+  focusLine?: number | null;
   onAsk?: (ctx: SelectionContext) => void;
   onSliceSelection?: (ctx: SelectionContext) => void;
   onTrace: (file: string, line: number, char: number) => void;
@@ -56,6 +66,7 @@ function FullFileView({
   useEffect(() => {
     let alive = true;
     setError("");
+    setSource("");
     sourceFor(file)
       .then((text) => { if (alive) setSource(text); })
       .catch((err) => { if (alive) setError(err instanceof Error ? err.message : String(err)); });
@@ -76,6 +87,7 @@ function FullFileView({
       symbols={base?.symbols || {}}
       focus={focus}
       ranges={ranges}
+      callSite={focusLine}
       showAll
       onTrace={onTrace}
       onSymbol={onSymbol}
@@ -94,17 +106,20 @@ export function ReadView() {
   const activeSliceId = useApp((s) => s.activeSliceId);
   const activeSegmentId = useApp((s) => s.activeSegmentId);
   const activeFile = useApp((s) => s.activeFile);
+  const activeLine = useApp((s) => s.activeLine);
   const selectSlice = useApp((s) => s.selectSlice);
   const selectSegment = useApp((s) => s.selectSegment);
   const selectSliceFile = useApp((s) => s.selectSliceFile);
   const openCode = useApp((s) => s.openCode);
   const setSelection = useApp((s) => s.setSelection);
-  const setContextTab = useApp((s) => s.setContextTab);
+  const revealDock = useApp((s) => s.revealDock);
   const trace = useApp((s) => s.trace);
   const setStage = useApp((s) => s.setStage);
   const generateSlice = useApp((s) => s.generateSlice);
   const focusMode = useApp((s) => s.focusMode);
   const toggleFocusMode = useApp((s) => s.toggleFocusMode);
+  const busy = useApp((s) => s.busy);
+  const error = useApp((s) => s.error);
   const [flowIndex, setFlowIndex] = useState(0);
 
   useEffect(() => {
@@ -113,15 +128,12 @@ export function ReadView() {
     }
   }, [sliceId, activeSliceId, selectSlice]);
 
-  // The old reader preserved the main scroll position between slices, which made
-  // every slice open at the bottom of the previous one. Always land at the top.
-  useEffect(() => {
-    document.querySelector(".main")?.scrollTo({ top: 0, behavior: "auto" });
-  }, [activeSliceId, activeSegmentId, activeFile]);
+  // Scroll position is remembered by the shell. Never force the reader back to
+  // the top while the user is moving between segments of the same slice.
 
   useEffect(() => {
-    if (slice) setFlowIndex(viewOfSegment(slice, activeSegmentId));
-  }, [slice?.id, activeSegmentId]);
+    if (slice) setFlowIndex((current) => viewOfSegment(slice, activeSegmentId, current));
+  }, [slice, activeSegmentId]);
 
   const segment = useMemo(
     () => slice?.segments.find((s) => s.id === activeSegmentId) || null,
@@ -135,7 +147,7 @@ export function ReadView() {
   function ask(ctx: SelectionContext) {
     if (!slice) return;
     setSelection(ctx);
-    setContextTab("thread");
+    revealDock("thread");
   }
 
   function onTrace(file: string, line: number, char: number) {
@@ -147,30 +159,62 @@ export function ReadView() {
     if (!file) return;
     void openCode(file, sid);
     setStage("read");
-    if (track) navigate(`/track/${track.track.id}/read`);
+    if (track) navigate(trackPath(track.track.id, "read"));
   }
 
   async function sliceFromSelection(ctx: SelectionContext) {
     const label = ctx.label || `${ctx.file}:${ctx.startLine}-${ctx.endLine}`;
-    const created = await generateSlice(`分析选中代码：${label}`, {
-      scope: {
-        kind: "selection",
-        file: ctx.file,
-        startLine: ctx.startLine,
-        endLine: ctx.endLine,
-        text: ctx.text,
-        label,
-      },
-    });
-    if (created && track) navigate(`/track/${track.track.id}/read/${created.id}`);
+    try {
+      const created = await generateSlice(`分析选中代码：${label}`, {
+        scope: {
+          kind: "selection",
+          file: ctx.file,
+          startLine: ctx.startLine,
+          endLine: ctx.endLine,
+          text: ctx.text,
+          label,
+        },
+      });
+      if (created && track) navigate(trackPath(track.track.id, "read", created.id));
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   async function newQuestion() {
     if (!slice) return;
     const q = window.prompt("继续问一个问题，生成新的切片", "");
     if (!q) return;
-    const created = await generateSlice(q);
-    if (created && track) navigate(`/track/${track.track.id}/read/${created.id}`);
+    try {
+      const created = await generateSlice(q);
+      if (created && track) navigate(trackPath(track.track.id, "read", created.id));
+    } catch {
+      /* the status bar shows the failure */
+    }
+  }
+
+  if (sliceId && slice?.id !== sliceId) {
+    const failed = !!error && !busy;
+    return (
+      <div className="stage">
+        <div className="stage-head reveal">
+          <div className="grow">
+            <div className="eyebrow">Stage 03 · Read</div>
+            <h1 className="stage-title">正在打开切片</h1>
+            <p className="stage-sub">{failed ? "这份切片没有打开。" : "正在读取切片与源码…"}</p>
+          </div>
+        </div>
+        {failed ? (
+          <div className="notice bad" style={{ alignItems: "center" }}>
+            <span className="grow">{error}</span>
+            <button className="btn btn-sm" onClick={() => void selectSlice(sliceId)}>重试</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => {
+              if (track) navigate(trackPath(track.track.id, "read"));
+            }}>回到阅读台</button>
+          </div>
+        ) : <div className="loading">正在打开切片…</div>}
+      </div>
+    );
   }
 
   if (!slice) {
@@ -193,6 +237,7 @@ export function ReadView() {
           <FullFileView
             file={activeFile}
             slice={null}
+            focusLine={activeLine}
             onSliceSelection={(ctx) => void sliceFromSelection(ctx)}
             onTrace={onTrace}
             onSymbol={onSymbol}
@@ -231,12 +276,17 @@ export function ReadView() {
             <span className="chip">{slice.segments.length} 片段</span>
             <span className="chip">{slice.views.length} 条流</span>
             {slice.staleness && !slice.staleness.fresh ? (
-              <span className="chip amber"><AlertTriangle size={10} /> {slice.staleness.summary}</span>
+              <span
+                className="chip amber"
+                title={`这份切片是快照：${slice.staleness.summary}。仍可阅读，但个别位置可能已变化。`}
+              >
+                <AlertTriangle size={10} /> {slice.staleness.summary}
+              </span>
             ) : null}
           </div>
         </div>
         <div className="stage-actions">
-          <button className="btn btn-sm" onClick={() => setContextTab("thread")}>
+          <button className="btn btn-sm" onClick={() => revealDock("thread")}>
             <MessageSquare size={13} /> 切片问答
           </button>
           <button className="btn btn-sm" onClick={newQuestion}>
@@ -249,24 +299,19 @@ export function ReadView() {
         </div>
       </div>
 
-      {slice.staleness && !slice.staleness.fresh ? (
-        <div className="notice warn" style={{ marginBottom: 12 }}>
-          <AlertTriangle size={13} />
-          这份切片是快照：{slice.staleness.summary}。仍可阅读，但个别位置可能已变化。
-        </div>
-      ) : null}
-
       <div className="read-toolbar">
         {views.length > 1 ? (
           <div className="flow-tabs" style={{ margin: 0 }}>
             {views.map((v, index) => (
               <button
-                key={v.title}
+                key={`${v.title}-${index}`}
                 className={`flow-tab${flowIndex === index ? " active" : ""}`}
                 onClick={() => {
                   setFlowIndex(index);
-                  const first = segmentsForView(v, slice, index)[0];
-                  if (first) selectSegment(first.id);
+                  const items = segmentsForView(v, slice, index);
+                  if (items.length && !items.some((item) => item.id === activeSegmentId)) {
+                    selectSegment(items[0].id);
+                  }
                 }}
               >
                 {v.title}
@@ -277,7 +322,7 @@ export function ReadView() {
           <span className="small muted">{view?.title || "切片段落"}</span>
         )}
         <span className="spacer" />
-        <span className="small muted">左侧目录：流程 / 文件 / 函数</span>
+        <span className="small muted read-toolbar-hint">左侧目录：流程 / 文件 / 函数</span>
       </div>
 
       {view && flowSegments.length ? (
@@ -300,6 +345,7 @@ export function ReadView() {
       <div className="read-center">
         {segment ? (
           <SegmentCard
+            key={segment.id}
             segment={segment}
             annotations={slice.annotations.filter((a) =>
               a.anchor.segmentId === segment.id
@@ -307,7 +353,7 @@ export function ReadView() {
             symbols={base?.symbols || {}}
             onAsk={ask}
             onTrace={onTrace}
-            onOpenFile={(file) => void selectSliceFile(file)}
+            onOpenFile={(file, line) => void selectSliceFile(file, line)}
             onSymbol={onSymbol}
             onSliceSelection={(ctx) => void sliceFromSelection(ctx)}
           />
@@ -315,6 +361,7 @@ export function ReadView() {
           <FullFileView
             file={activeFile}
             slice={slice}
+            focusLine={activeLine}
             onAsk={ask}
             onSliceSelection={(ctx) => void sliceFromSelection(ctx)}
             onTrace={onTrace}
@@ -334,7 +381,7 @@ export function ReadView() {
         </button>
         <button className="btn btn-sm btn-ghost" onClick={() => {
           setStage("library");
-          if (track) navigate(`/track/${track.track.id}/library`);
+          if (track) navigate(trackPath(track.track.id, "library"));
         }}>
           <BookOpen size={13} /> 切片库
         </button>

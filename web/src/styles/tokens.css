@@ -17,20 +17,78 @@
   --amber-soft: #f3e7d4;
   --rust: #b45a45;
   --rust-soft: #f3ded7;
-  --code-bg: #0f1716;
-  --code-bg-2: #14201e;
-  --code-ink: #d7e4df;
-  --code-muted: #6f8781;
-  --code-line: #1c2a27;
+  /* Reading rhythm. The classic UI was tuned too small for long code sessions. */
+  --ui-size: 14.5px;
+  --rich-size: 13.6px;
+  --prose-sm: 12.6px;
+  --code-size: 13px;
+  --code-line-height: 22px;
+  --code-border: #dfeae5;
+  --code-bg: #fbfdfc;
+  --code-bg-2: #eef4f1;
+  --code-ink: #26332f;
+  --code-muted: #647873;
+  --code-line: #e2ebe7;
+  --code-row-hover: rgba(23, 34, 31, 0.035);
+  --code-toolbar-bg: #1b2926;
+  --code-toolbar-ink: #d7e4df;
+  --tok-punct: #6f817b;
+  --tok-key: #9c5d12;
+  --tok-def: #1f6f63;
+  --tok-call: #2a514b;
+  --tok-str: #4f7a2f;
+  --tok-com: #7c8f89;
+  --tok-num: #8a5a1f;
+  --tok-type: #356b86;
+  --tok-self: #9a5042;
+  --tok-deco: #7a4f93;
+  --code-hover: rgba(47, 125, 115, 0.08);
   --shadow: 0 18px 50px rgba(23, 34, 31, 0.08);
   --shadow-soft: 0 8px 24px rgba(23, 34, 31, 0.06);
   --radius: 14px;
   --radius-sm: 9px;
-  --rail: 264px;
-  --dock: 392px;
+  --rail: 244px;
+  --dock: 380px;
   --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
   --font-ui: "Sora", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+html[data-code-theme="dark"] {
+  --code-border: #22312e;
+  --code-bg: #121b1a;
+  --code-bg-2: #172421;
+  --code-ink: #d7e4df;
+  --code-muted: #7b928c;
+  --code-line: #21302d;
+  --code-row-hover: rgba(255, 255, 255, 0.035);
+  --tok-punct: #7f9892;
+  --tok-key: #e0a86d;
+  --tok-def: #9ed8ce;
+  --tok-call: #c8e4df;
+  --tok-str: #b5cfa0;
+  --tok-com: #6f8781;
+  --tok-num: #d6b98c;
+  --tok-type: #9fc4d8;
+  --tok-self: #d8a9a0;
+  --tok-deco: #c9a7d6;
+  --code-hover: rgba(142, 201, 196, 0.16);
+}
+
+html[data-reading="compact"] {
+  --ui-size: 13.5px;
+  --rich-size: 12.8px;
+  --prose-sm: 11.8px;
+  --code-size: 11.8px;
+  --code-line-height: 20px;
+}
+
+html[data-reading="large"] {
+  --ui-size: 15.5px;
+  --rich-size: 14.8px;
+  --prose-sm: 13.6px;
+  --code-size: 14px;
+  --code-line-height: 24px;
 }
 
 * { box-sizing: border-box; }
@@ -41,7 +99,7 @@ body {
   margin: 0;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13.5px;
+  font-size: var(--ui-size);
   line-height: 1.62;
   background:
     radial-gradient(900px 520px at 12% -8%, rgba(142, 201, 196, 0.22), transparent 62%),

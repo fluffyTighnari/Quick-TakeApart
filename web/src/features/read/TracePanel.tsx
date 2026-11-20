@@ -1,11 +1,16 @@
+import { useNavigate } from "react-router-dom";
 import { ArrowDownLeft, ArrowUpRight, CircleDot, Crosshair, X } from "lucide-react";
 import { useApp } from "../../core/store";
+import { trackPath } from "../../core/routes";
 
 function shortName(sid: string) {
   return sid.split("::").pop()?.split(".").pop() || sid;
 }
 
 export function TracePanel() {
+  const navigate = useNavigate();
+  const track = useApp((s) => s.track);
+  const slice = useApp((s) => s.activeSlice);
   const result = useApp((s) => s.traceResult);
   const request = useApp((s) => s.traceRequest);
   const loading = useApp((s) => s.traceLoading);
@@ -66,8 +71,9 @@ export function TracePanel() {
               style={{ padding: "7px 8px", whiteSpace: "normal" }}
               onClick={() => {
                 if (loc.symbolId) void selectSymbol(loc.symbolId);
-                else void selectFile(loc.file);
+                else void selectFile(loc.file, loc.line);
                 setStage("read");
+                if (track) navigate(trackPath(track.track.id, "read", slice?.id));
               }}
             >
               <div className="row">

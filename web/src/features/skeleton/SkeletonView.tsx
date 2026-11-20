@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  AlertTriangle, ArrowRight, Boxes, GitBranch, Layers, Loader2, Plus,
-  RefreshCw, Sparkles,
+  ArrowRight, Boxes, GitBranch, Layers, Plus, RefreshCw, Sparkles,
 } from "lucide-react";
 import { useApp } from "../../core/store";
+import { trackPath } from "../../core/routes";
+import { plainText } from "../../core/text";
 import type { Skeleton, SkeletonNode } from "../../types";
-import { RichText } from "../../ui/RichText";
 
 function Connector({ status }: { status: "direct" | "reverse" | "inferred" }) {
   return (
@@ -30,7 +30,9 @@ export function SkeletonView() {
   const generateSkeleton = useApp((s) => s.generateSkeleton);
   const explainSkeletonNode = useApp((s) => s.explainSkeletonNode);
   const importSkeletonMain = useApp((s) => s.importSkeletonMain);
+  const revealDock = useApp((s) => s.revealDock);
   const busy = useApp((s) => s.busy);
+  const generating = busy?.startsWith("正在生成逻辑骨架") || false;
   const [focus, setFocus] = useState("");
 
   const skeleton: Skeleton | null = useMemo(() => {
@@ -43,14 +45,19 @@ export function SkeletonView() {
   }, [skeleton, activeSkeletonId, selectSkeleton]);
 
   async function generate() {
-    const created = await generateSkeleton(focus);
-    selectSkeleton(created.id);
-    setFocus("");
+    try {
+      const created = await generateSkeleton(focus);
+      selectSkeleton(created.id);
+      setFocus("");
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   function openNode(node: SkeletonNode) {
     if (!skeleton) return;
     selectSkeletonNode(node.id);
+    revealDock("details");
     if (!node.detail && !busy) {
       void explainSkeletonNode(skeleton.id, node.id).catch(() => undefined);
     }
@@ -58,8 +65,12 @@ export function SkeletonView() {
 
   async function importMain() {
     if (!skeleton) return;
-    await importSkeletonMain(skeleton.id);
-    if (track) navigate(`/track/${track.track.id}/plan`);
+    try {
+      await importSkeletonMain(skeleton.id);
+      if (track) navigate(trackPath(track.track.id, "plan"));
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   if (!skeleton) {
@@ -88,7 +99,7 @@ export function SkeletonView() {
                   placeholder="例如：整体逻辑 / 请求链路 / 启动过程" />
               </div>
               <button className="btn btn-primary" disabled={!!busy} onClick={() => void generate()}>
-                <Sparkles size={14} /> {busy ? "生成中…" : "生成骨架"}
+                <Sparkles size={14} /> {generating ? "生成中…" : "生成骨架"}
               </button>
             </div>
           </div>
@@ -105,13 +116,18 @@ export function SkeletonView() {
             Stage 01 · Skeleton · {skeleton.focus || "整体逻辑"}
           </div>
           <h1 className="stage-title">{skeleton.title}</h1>
-          <p className="stage-sub">{skeleton.overview}</p>
+          <p className="stage-sub">{plainText(skeleton.overview)}</p>
           <div className="row wrap" style={{ marginTop: 9, gap: 6 }}>
             <span className="chip teal">{skeleton.main.length} 个主流程节点</span>
             <span className="chip">{skeleton.support.length} 个平行支撑</span>
             <span className="chip">{skeleton.detailCount || 0} 个已生成讲解</span>
             {skeleton.staleness && !skeleton.staleness.fresh ? (
-              <span className="chip amber">{skeleton.staleness.summary}</span>
+              <span
+                className="chip amber"
+                title={`骨架与当前代码有漂移：${skeleton.staleness.summary}。节点仍可阅读，但个别位置可能已变化。`}
+              >
+                {skeleton.staleness.summary}
+              </span>
             ) : null}
           </div>
         </div>
@@ -138,20 +154,13 @@ export function SkeletonView() {
               placeholder="换个关注点…" style={{ padding: "6px 9px", fontSize: 11 }} />
           </div>
           <button className="btn btn-sm" disabled={!!busy} onClick={() => void generate()}>
-            <RefreshCw size={13} className={busy ? "spin" : ""} /> 重新生成
+            <RefreshCw size={13} className={generating ? "spin" : ""} /> 重新生成
           </button>
           <button className="btn btn-sm btn-primary" disabled={!!busy} onClick={() => void importMain()}>
             <Plus size={13} /> 主流程导入计划
           </button>
         </div>
       </div>
-
-      {skeleton.staleness && !skeleton.staleness.fresh ? (
-        <div className="notice warn" style={{ marginBottom: 12 }}>
-          <AlertTriangle size={13} />
-          骨架与当前代码有漂移：{skeleton.staleness.summary}。节点仍可阅读，但个别位置可能已变化。
-        </div>
-      ) : null}
 
       <div className="skeleton-layout">
         <section className="skeleton-main">
@@ -176,7 +185,7 @@ export function SkeletonView() {
                     <span className="sk-num">{String(index + 1).padStart(2, "0")}</span>
                     <span className="sk-body">
                       <span className="sk-title">{node.title}</span>
-                      <span className="sk-summary">{node.summary}</span>
+                      <span className="sk-summary">{plainText(node.summary)}</span>
                       <span className="sk-meta">
                         {node.phase ? <span className="chip muted">{node.phase}</span> : null}
                         <span className="chip">{node.symbolIds.length} 符号</span>
@@ -213,7 +222,7 @@ export function SkeletonView() {
                 <div className="sk-support-icon"><Layers size={13} /></div>
                 <div className="grow">
                   <div className="sk-title">{node.title}</div>
-                  <div className="sk-summary">{node.summary}</div>
+                  <div className="sk-summary">{plainText(node.summary)}</div>
                   <div className="sk-meta">
                     <span className="chip">{node.symbolIds.length} 符号</span>
                     {node.detail ? <span className="chip teal">已讲解</span> : null}
@@ -239,13 +248,15 @@ export function SkeletonView() {
         <button className="btn btn-sm" onClick={() => {
           if (!track) return;
           useApp.getState().setStage("plan");
-          navigate(`/track/${track.track.id}/plan`);
+          navigate(trackPath(track.track.id, "plan"));
         }}>
           <ArrowRight size={13} /> 去计划
         </button>
         <button className="btn btn-sm btn-ghost" onClick={() => {
           useApp.getState().setStage("read");
-          if (track) navigate(`/track/${track.track.id}/read`);
+          if (track) {
+            navigate(trackPath(track.track.id, "read", useApp.getState().activeSliceId));
+          }
         }}>
           直接去读代码
         </button>

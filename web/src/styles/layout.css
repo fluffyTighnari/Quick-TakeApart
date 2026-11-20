@@ -3,6 +3,7 @@
   z-index: 1;
   height: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 60px minmax(0, 1fr) 30px;
 }
 
@@ -84,6 +85,7 @@
 .stage-tabs {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 2px;
   background: rgba(228, 238, 234, 0.62);
   border: 1px solid transparent;
@@ -96,7 +98,9 @@
   color: var(--ink-3);
   padding: 6px 12px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: calc(var(--ui-size) - 2.5px);
+  line-height: 1.2;
+  white-space: nowrap;
   letter-spacing: .01em;
   transition: background .16s, color .16s, box-shadow .16s;
   display: flex;
@@ -180,7 +184,8 @@
 .rail {
   border-right: 1px solid var(--line);
   background: rgba(240, 246, 243, 0.55);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 16px 12px 22px;
   min-height: 0;
 }
@@ -200,6 +205,26 @@
   font-size: 14px; line-height: 1; padding: 0 2px;
 }
 .rail-label button:hover { color: var(--teal); }
+.rail-label .badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-radius: 99px;
+  padding: 1px 6px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.panel-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1.4;
+}
 
 .rail-nav { display: flex; flex-direction: column; gap: 2px; }
 .rail-item {
@@ -212,7 +237,7 @@
   background: transparent;
   color: var(--ink-2);
   text-align: left;
-  font-size: 12.5px;
+  font-size: calc(var(--ui-size) - 1.5px);
   transition: .16s;
   width: 100%;
 }
@@ -261,7 +286,7 @@
   background: transparent;
   border-radius: 8px;
   padding: 6px 9px;
-  font-size: 11.5px;
+  font-size: var(--prose-sm);
   color: var(--ink-3);
   white-space: nowrap;
   overflow: hidden;
@@ -295,10 +320,13 @@
 .stage-head {
   display: flex;
   align-items: flex-start;
-  gap: 18px;
+  flex-wrap: wrap;
+  gap: 12px 18px;
   margin-bottom: 22px;
 }
-.stage-head .grow { flex: 1; min-width: 0; }
+/* The header wraps based on its own width, not just the viewport. Side panels
+   can eat 600px, so a 1440px window still has a narrow text column. */
+.stage-head .grow { flex: 1 1 460px; min-width: 0; }
 .eyebrow {
   font-size: 10.5px;
   letter-spacing: .16em;
@@ -315,8 +343,8 @@
   display: inline-block;
 }
 .stage-title { font-size: 30px; line-height: 1.12; margin-bottom: 7px; }
-.stage-sub { color: var(--ink-3); font-size: 12.5px; max-width: 760px; }
-.stage-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+.stage-sub { color: var(--ink-3); font-size: var(--rich-size); line-height: 1.7; max-width: 760px; }
+.stage-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 
 /* ---------------- context dock ---------------- */
 
@@ -359,20 +387,33 @@
   border-top: 1px solid var(--line);
   background: rgba(247,250,248,.76);
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: var(--font-mono);
   z-index: 10;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .statusbar .st-spacer { flex: 1; }
-.statusbar .st-item { display: flex; align-items: center; gap: 5px; }
+.statusbar .st-item { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.statusbar .st-workspace { max-width: 390px; }
+.statusbar .st-workspace .truncate { display: block; }
 .statusbar .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--teal); }
 .statusbar .dot.busy { animation: pulse 1s infinite; background: var(--amber); }
 
 /* ---------------- responsive ---------------- */
 
+@media (max-width: 1460px) {
+  .top-stats { display: none; }
+}
 @media (max-width: 1240px) {
   :root { --rail: 240px; --dock: 344px; }
-  .top-stats { display: none; }
+  .topbar { gap: 12px; }
+  .stage-tab .num { display: none; }
+}
+@media (max-width: 1180px) {
+  /* Keep focus mode: at this width it is the way to get a wide reading column. */
+  .top-toggle-rail, .top-toggle-dock { display: none; }
+  .project-switch { max-width: 200px; }
 }
 @media (max-width: 1400px) {
   /* The skeleton header has a selector + focus + two actions. Below a wide
@@ -395,14 +436,45 @@
   .brand-sub { display: none; }
   .stage { padding: 22px 20px 40px; }
 }
+@media (max-width: 900px) {
+  .statusbar .st-workspace,
+  .statusbar .st-persist { display: none; }
+}
+
+@media (max-width: 980px) {
+  .topbar { gap: 8px; padding: 0 10px; overflow: hidden; }
+  .brand { min-width: 0; gap: 0; }
+  .brand-name, .brand-sub { display: none; }
+  .top-divider { display: none; }
+  .project-switch { max-width: 158px; min-width: 0; }
+  .stage-tabs { gap: 0; padding: 2px; }
+  .stage-tab { padding: 6px 8px; }
+  .stage-tab .num { display: none; }
+  .stage-tab .lbl { display: none; }
+}
+
 @media (max-width: 860px) {
-  .body { grid-template-columns: 1fr; }
+  /* Collapsed sidebars must not leave their grid tracks behind. Without this
+     override the main column was auto-placed into a 0px or 224px first track. */
+  .body,
+  .body.no-dock,
+  .body.rail-closed,
+  .body.dock-closed,
+  .body.no-dock.rail-closed,
+  .body.no-dock.dock-closed,
+  .body.rail-closed.dock-closed,
+  .body.no-dock.rail-closed.dock-closed {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .rail { display: none; }
   .dock { display: none; }
   .stage { padding: 18px 16px 36px; }
   .stage-head { flex-direction: column; }
   .stage-actions { justify-content: flex-start; }
-  .topbar { gap: 8px; padding: 0 10px; }
-  .project-switch { max-width: 160px; }
-  .stage-tab .lbl { display: none; }
+  .statusbar .st-hint-trace { display: none; }
+}
+
+@media (max-width: 700px) {
+  .statusbar .st-hint-command { display: none; }
+  .statusbar { gap: 10px; padding: 0 10px; }
 }

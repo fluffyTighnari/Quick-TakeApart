@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Send, Sparkles } from "lucide-react";
 import { useApp } from "../../core/store";
+import { isImeEvent } from "../../core/keyboard";
+import { trackPath } from "../../core/routes";
 import { RichText } from "../../ui/RichText";
 
 export function PlanChat() {
@@ -18,11 +20,13 @@ export function PlanChat() {
 
   const thread = track?.planThread;
   const messages = thread?.messages || [];
+  const thinking = busy?.startsWith("正在修改计划") || false;
+  const existingSteps = new Set((track?.plan?.items || []).map((item) => item.id));
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, busy]);
+  }, [messages.length, thinking]);
 
   async function send() {
     const text = message.trim();
@@ -69,12 +73,12 @@ export function PlanChat() {
                       const file = base?.symbols[sid]?.file;
                       if (file) void openCode(file, sid);
                       setStage("read");
-                      if (track) navigate(`/track/${track.track.id}/read`);
+                      if (track) navigate(trackPath(track.track.id, "read"));
                     }}
                     onLocation={(file) => {
                       void openCode(file);
                       setStage("read");
-                      if (track) navigate(`/track/${track.track.id}/read`);
+                      if (track) navigate(trackPath(track.track.id, "read"));
                     }}
                   />
                 ) : (
@@ -88,10 +92,10 @@ export function PlanChat() {
                 </div>
               ) : null}
 
-              {needs.length ? (
+              {needs.filter((need) => !existingSteps.has(need.stepId)).length ? (
                 <div className="chat-needs">
                   <div className="small muted" style={{ marginBottom: 4 }}>这一步需要的切片还不存在：</div>
-                  {needs.map((need, i) => (
+                  {needs.filter((need) => !existingSteps.has(need.stepId)).map((need, i) => (
                     <div className="chat-need-row" key={i}>
                       <code className="truncate" style={{ maxWidth: 180 }}>{need.query}</code>
                       <span className="spacer" />
@@ -125,7 +129,7 @@ export function PlanChat() {
           );
         })}
 
-        {busy ? <div className="loading" style={{ padding: "4px 2px" }}>正在把这句话映射成计划变更…</div> : null}
+        {thinking ? <div className="loading" style={{ padding: "4px 2px" }}>正在把这句话映射成计划变更…</div> : null}
       </div>
 
       <div className="chat-composer">
@@ -136,7 +140,7 @@ export function PlanChat() {
             placeholder="说需求，不说感想：先看认证 / 加一步看写库 / 这部分太细了…"
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !isImeEvent(e)) {
                 e.preventDefault();
                 void send();
               }

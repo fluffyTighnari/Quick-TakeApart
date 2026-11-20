@@ -1,8 +1,10 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { FolderOpen, FolderSearch, MousePointer2, Upload, X } from "lucide-react";
 import { api } from "../core/api";
+import { isImeEvent } from "../core/keyboard";
 import { useApp } from "../core/store";
 import { extractDropPath } from "../core/localPath";
+import { useEscape } from "../ui/useEscape";
 import { FolderBrowser } from "./FolderBrowser";
 
 export function ProjectModal({ onClose }: { onClose: () => void }) {
@@ -16,6 +18,8 @@ export function ProjectModal({ onClose }: { onClose: () => void }) {
   const [picking, setPicking] = useState(false);
   const [dropOver, setDropOver] = useState(false);
   const [dropNote, setDropNote] = useState("");
+
+  useEscape(onClose);
 
   useEffect(() => {
     api.projects().then((data) => {
@@ -72,7 +76,7 @@ export function ProjectModal({ onClose }: { onClose: () => void }) {
       if (e.target === e.currentTarget) onClose();
     }}>
       <div
-        className="palette"
+        className="palette dialog"
         style={{ padding: 18 }}
         onDragOver={(e) => { e.preventDefault(); setDropOver(true); }}
         onDragLeave={() => setDropOver(false)}
@@ -95,7 +99,7 @@ export function ProjectModal({ onClose }: { onClose: () => void }) {
               value={root}
               spellCheck={false}
               onChange={(e) => setRoot(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !isImeEvent(e)) void submit(); }}
             />
           </div>
           <button className="btn btn-primary" disabled={!!busy} onClick={() => void submit()}>
@@ -118,6 +122,7 @@ export function ProjectModal({ onClose }: { onClose: () => void }) {
 
         {recent.length ? (
           <div className="recent" style={{ marginTop: 12 }}>
+            <div className="rail-label" style={{ padding: "2px 0 4px" }}>最近打开</div>
             {recent.map((item) => (
               <button key={item} onClick={() => { setRoot(item); void submit(item); }} title={item}>{item}</button>
             ))}

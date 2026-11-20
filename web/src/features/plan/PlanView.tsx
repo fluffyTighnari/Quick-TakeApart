@@ -5,19 +5,11 @@ import {
   Plus, RefreshCw, Route, Trash2, X,
 } from "lucide-react";
 import { useApp } from "../../core/store";
+import { isImeEvent } from "../../core/keyboard";
+import { trackPath } from "../../core/routes";
+import { plainText } from "../../core/text";
+import { useEscape } from "../../ui/useEscape";
 import type { PlanItem } from "../../types";
-
-function plainExcerpt(text: string, limit = 180): string {
-  return text
-    .replace(/\[\[(?:sym|loc):([^|\]]+)(?:\|([^\]]+))?\]\]/g, (_, id, label) => label || id)
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/[*#>]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, limit);
-}
 
 type PendingNeed = {
   query: string;
@@ -57,6 +49,7 @@ function AddStepModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  useEscape(onClose);
 
   async function submit() {
     if (!query.trim()) return;
@@ -77,7 +70,7 @@ function AddStepModal({ onClose }: { onClose: () => void }) {
         skippable: "",
       });
       await applyPlan(items, plan?.name, plan?.intent);
-      navigate(`/track/${track?.track.id}/read/${slice.id}`);
+      if (track) navigate(trackPath(track.track.id, "read", slice.id));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -88,7 +81,7 @@ function AddStepModal({ onClose }: { onClose: () => void }) {
     <div className="palette-backdrop" onMouseDown={(e) => {
       if (e.target === e.currentTarget) onClose();
     }}>
-      <div className="palette" style={{ padding: 18 }}>
+      <div className="palette dialog" style={{ padding: 18 }}>
         <div className="row" style={{ marginBottom: 12 }}>
           <div className="grow">
             <div className="eyebrow" style={{ marginBottom: 2 }}>手动加一步</div>
@@ -101,7 +94,7 @@ function AddStepModal({ onClose }: { onClose: () => void }) {
             <label>这一步要读什么</label>
             <input className="input" autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
               placeholder="例如：追踪 WebSocket Server 的消息分发"
-              onKeyDown={(e) => { if (e.key === "Enter") void submit(); }} />
+              onKeyDown={(e) => { if (e.key === "Enter" && !isImeEvent(e)) void submit(); }} />
           </div>
           <div className="small muted">
             目的和粒度沿用当前轨道「{track?.track.depth || "结构"}」，这里不再重复选择。
@@ -129,6 +122,7 @@ export function PlanView() {
   const selectSlice = useApp((s) => s.selectSlice);
   const setStage = useApp((s) => s.setStage);
   const setContextTab = useApp((s) => s.setContextTab);
+  const revealDock = useApp((s) => s.revealDock);
   const generateBind = useApp((s) => s.generateBind);
   const applyPlan = useApp((s) => s.applyPlan);
   const planChat = useApp((s) => s.planChat);
@@ -156,22 +150,26 @@ export function PlanView() {
     if (slice) {
       await selectSlice(slice.id);
       setStage("read");
-      if (track) navigate(`/track/${track.track.id}/read/${slice.id}`);
+      if (track) navigate(trackPath(track.track.id, "read", slice.id));
     } else {
       await generateForStep(item);
     }
   }
 
   async function generateForStep(item: PlanItem) {
-    await generateBind({
-      query: item.goal || plan?.name || "这一步要读的代码",
-      stepId: item.id,
-      goal: item.goal,
-      after: item.after,
-      granularity: item.granularity,
-      skippable: item.skippable,
-    });
-    if (track) navigate(`/track/${track.track.id}/read`);
+    try {
+      const created = await generateBind({
+        query: item.goal || plan?.name || "这一步要读的代码",
+        stepId: item.id,
+        goal: item.goal,
+        after: item.after,
+        granularity: item.granularity,
+        skippable: item.skippable,
+      });
+      if (track) navigate(trackPath(track.track.id, "read", created.id));
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   async function removeStep(item: PlanItem) {
@@ -180,7 +178,11 @@ export function PlanView() {
       id: i.id, flowId: i.flowId, goal: i.goal, after: i.after.filter((a) => a !== item.id),
       skippable: i.skippable, granularity: i.granularity,
     }));
-    await applyPlan(next, plan?.name, plan?.intent);
+    try {
+      await applyPlan(next, plan?.name, plan?.intent);
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   async function moveStep(item: PlanItem, direction: -1 | 1) {
@@ -189,10 +191,14 @@ export function PlanView() {
     if (target < 0 || target >= ordered.length) return;
     const next = [...ordered];
     [next[index], next[target]] = [next[target], next[index]];
-    await applyPlan(next.map((i) => ({
-      id: i.id, flowId: i.flowId, goal: i.goal, after: i.after,
-      skippable: i.skippable, granularity: i.granularity,
-    })), plan?.name, plan?.intent);
+    try {
+      await applyPlan(next.map((i) => ({
+        id: i.id, flowId: i.flowId, goal: i.goal, after: i.after,
+        skippable: i.skippable, granularity: i.granularity,
+      })), plan?.name, plan?.intent);
+    } catch {
+      /* the status bar shows the failure */
+    }
   }
 
   async function startPlan() {
@@ -204,7 +210,7 @@ export function PlanView() {
     ].join("\n");
     try {
       await planChat(message);
-      setContextTab("thread");
+      revealDock("thread");
     } catch {
       /* the store surfaces the error in the status bar */
     }
@@ -229,14 +235,14 @@ export function PlanView() {
           </div>
         </div>
         <div className="stage-actions">
-          <button className="btn btn-sm" onClick={() => setContextTab("thread")}>
+          <button className="btn btn-sm" onClick={() => revealDock("thread")}>
             <MessageSquare size={13} /> 计划对话
           </button>
           <button className="btn btn-sm" onClick={() => setAddOpen(true)}>
             <Plus size={13} /> 加一步
           </button>
           {plan ? (
-            <button className="btn btn-sm btn-ghost" onClick={() => void applyPlan(items, plan.name, plan.intent)}>
+            <button className="btn btn-sm btn-ghost" onClick={() => void applyPlan(items, plan.name, plan.intent).catch(() => undefined)}>
               <RefreshCw size={13} /> 保存
             </button>
           ) : null}
@@ -312,7 +318,13 @@ export function PlanView() {
                   onClick={() => { if (slice) void openStep(item); }}
                   role="button"
                   tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter") void openStep(item); }}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void openStep(item);
+                    }
+                  }}
                 >
                   <div className="step-num">{String(index + 1).padStart(2, "0")}</div>
                   <div className="step-top">
@@ -347,7 +359,7 @@ export function PlanView() {
                     ) : null}
                   </div>
 
-                  {slice?.summary ? <div className="step-sub">{plainExcerpt(slice.summary)}</div> : null}
+                  {slice?.summary ? <div className="step-sub">{plainText(slice.summary, 180)}</div> : null}
 
                   <div className="step-foot">
                     {deps.length ? (
@@ -400,7 +412,7 @@ export function PlanView() {
                       skippable: need.skippable,
                       skeletonId: need.skeletonId,
                       nodeId: need.nodeId,
-                    })}
+                    }).catch(() => undefined)}
                   >
                     <Loader2 size={12} className={busy ? "spin" : ""} /> 生成并绑定
                   </button>
@@ -418,7 +430,7 @@ export function PlanView() {
 
           <div className="row wrap" style={{ marginTop: 16, gap: 8 }}>
             <button className="btn btn-sm" onClick={() => setAddOpen(true)}><Plus size={13} /> 加一步</button>
-            <button className="btn btn-sm btn-ghost" onClick={() => setContextTab("thread")}>
+            <button className="btn btn-sm btn-ghost" onClick={() => revealDock("thread")}>
               <MessageSquare size={13} /> 在对话里调整
             </button>
             <span className="spacer" />

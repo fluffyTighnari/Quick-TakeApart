@@ -1760,9 +1760,14 @@ def main() -> int:
         print("  这个端口很可能被另一个旧的 python 进程占用。", file=sys.stderr)
         print("", file=sys.stderr)
         print("  查看占用进程：", file=sys.stderr)
-        print(f"    Get-NetTCPConnection -LocalPort {args.port} -State Listen", file=sys.stderr)
-        print("  结束旧进程（管理员终端）：", file=sys.stderr)
-        print("    taskkill /PID <PID> /F", file=sys.stderr)
+        if os.name == "nt":
+            print(f"    Get-NetTCPConnection -LocalPort {args.port} -State Listen", file=sys.stderr)
+            print("  结束旧进程（管理员终端）：", file=sys.stderr)
+            print("    taskkill /PID <PID> /F", file=sys.stderr)
+        else:
+            print(f"    lsof -nP -iTCP:{args.port} -sTCP:LISTEN", file=sys.stderr)
+            print("  结束旧进程：", file=sys.stderr)
+            print("    kill <PID>", file=sys.stderr)
         print("", file=sys.stderr)
         print("  或者直接换端口：", file=sys.stderr)
         print(f"    python serve.py <项目目录> --port {args.port + 1}", file=sys.stderr)

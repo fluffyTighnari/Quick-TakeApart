@@ -17,12 +17,14 @@ export function StatusBar() {
         {busy || "就绪"}
       </span>
       {workspace ? (
-        <span className="st-item">
-          {workspace.name} · {workspace.stats.files} 文件 / {workspace.stats.callables} 函数 / {workspace.stats.edges} 边
+        <span className="st-item st-workspace" title={`${workspace.name} · ${workspace.stats.files} 文件 / ${workspace.stats.callables} 函数 / ${workspace.stats.edges} 边`}>
+          <span className="truncate">
+            {workspace.name} · {workspace.stats.files} 文件 / {workspace.stats.callables} 函数 / {workspace.stats.edges} 边
+          </span>
         </span>
       ) : null}
-      <span className="st-item"><span className="dot" /> 持久化 · .qta/</span>
-      {track ? <span className="st-item">轨道 · {track.track.name}</span> : null}
+      <span className="st-item st-persist"><span className="dot" /> 持久化 · .qta/</span>
+      {track ? <span className="st-item st-track">轨道 · {track.track.name}</span> : null}
       <span className="st-spacer" />
       {notice ? (
         <span className="st-item" style={{ maxWidth: 420 }}>
@@ -36,8 +38,8 @@ export function StatusBar() {
           <button className="btn-ghost btn-xs" onClick={() => setError(null)}><X size={10} /></button>
         </span>
       ) : null}
-      <span className="st-item">Ctrl/Cmd+K 命令</span>
-      <span className="st-item">Ctrl+点击函数/变量</span>
+      <span className="st-item st-hint-command">Ctrl/Cmd+K 命令</span>
+      <span className="st-item st-hint-trace">Ctrl+点击函数/变量</span>
     </footer>
   );
 }
